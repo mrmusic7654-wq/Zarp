@@ -137,6 +137,40 @@ fun SettingsItemToggle(title: String, initialValue: Boolean) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToApiKey: () -> Unit    // <-- new parameter
+) {
+    // ... rest unchanged ...
+
+    Column(modifier = ...) {
+        // ... existing sections ...
+
+        SettingsSectionTitle("Data & Privacy")
+        SettingsItemToggle("Chat history", true)
+        SettingsItemAction("API Key") {          // <-- new item
+            onNavigateToApiKey()
+        }
+        SettingsItemAction("Export data")
+        // ...
+    }
+}
+
+// Also update the SettingsItemAction to accept onClick:
+@Composable
+fun SettingsItemAction(title: String, textColor: Color = ZarpTextPrimary, onClick: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = title, color = textColor, fontSize = 16.sp, modifier = Modifier.weight(1f))
+    }
+}
 @Composable
 fun SettingsItemAction(title: String, textColor: Color = ZarpTextPrimary) {
     Row(

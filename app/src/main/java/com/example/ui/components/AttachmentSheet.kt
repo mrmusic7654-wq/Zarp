@@ -23,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,8 +46,7 @@ fun AttachmentSheet(
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
 
-    // Camera launcher
-    val cameraUri = remember { 
+    val cameraUri = remember {
         val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
@@ -57,22 +57,25 @@ fun AttachmentSheet(
         if (success) onImageSelected(cameraUri)
     }
 
-    // Gallery launcher
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { onImageSelected(it) }
     }
 
-    // File picker launcher
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { 
-            val name = context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
-                cursor.moveToFirst()
-                cursor.getString(cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME))
-            } ?: "File"
+            val name = try {
+                context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getString(cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME))
+                    } else "File"
+                } ?: "File"
+            } catch (e: Exception) {
+                "File"
+            }
             onFileSelected(it, name)
         }
     }

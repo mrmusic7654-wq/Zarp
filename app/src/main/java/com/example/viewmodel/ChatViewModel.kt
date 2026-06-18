@@ -5,8 +5,9 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ChatRepository
 import com.example.data.GeminiRepository
-import com.example.data.MockData
+import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
 import com.example.model.Message
 import kotlinx.coroutines.delay
@@ -24,60 +25,60 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val isListening: Boolean = false,
         val isAiThinking: Boolean = false,
         val currentConversationId: String? = null,
-        val conversations: List<Conversation> = MockData.conversations,
+        val conversations: List<Conversation> = emptyList(),
         val isDrawerOpen: Boolean = false,
         val showAttachmentSheet: Boolean = false,
         val selectedImageUri: Uri? = null,
         val selectedFileName: String? = null,
-        val selectedModel: String = "Gemini 2.5 Flash"
+        val selectedModel: String = "Gemini 2.5 Flash",
+        val isDarkTheme: Boolean = true
     )
 
     companion object {
-        // ────────────────────────────────────────────
-        // Free-tier models confirmed by Gemini API
-        // ────────────────────────────────────────────
         val availableModels = listOf(
             "Gemini 3 Flash Preview",
             "Gemini 3.1 Flash Lite Preview",
             "Gemini 2.5 Flash",
             "Gemini 2.5 Flash-Lite",
-            "Gemini 2.0 Flash",
-            "Gemini 2.0 Flash-Lite",
             "Gemma 4 26B",
             "Gemma 4 31B"
         )
 
         fun getModelApiName(displayName: String): String = when (displayName) {
-            "Gemini 3 Flash Preview"          -> "gemini-3-flash-preview"
-            "Gemini 3.1 Flash Lite Preview"  -> "gemini-3.1-flash-lite-preview"
-            "Gemini 2.5 Flash"                -> "gemini-2.5-flash"
-            "Gemini 2.5 Flash-Lite"           -> "gemini-2.5-flash-lite"
-            "Gemini 2.0 Flash"                -> "gemini-2.0-flash"
-            "Gemini 2.0 Flash-Lite"           -> "gemini-2.0-flash-lite"
-            "Gemma 4 26B"                     -> "gemma-4-26b-a4b-it"
-            "Gemma 4 31B"                     -> "gemma-4-31b-it"
-            else -> "gemini-2.5-flash"
+            "Gemini 3 Flash Preview"         -> "models/gemini-3-flash-preview"
+            "Gemini 3.1 Flash Lite Preview" -> "models/gemini-3.1-flash-lite-preview"
+            "Gemini 2.5 Flash"               -> "models/gemini-2.5-flash"
+            "Gemini 2.5 Flash-Lite"          -> "models/gemini-2.5-flash-lite"
+            "Gemma 4 26B"                    -> "models/gemma-4-26b-a4b-it"
+            "Gemma 4 31B"                    -> "models/gemma-4-31b-it"
+            else -> "models/gemini-2.5-flash"
         }
     }
 
-    private val repository = GeminiRepository(application)
+    private val database = ChatDatabase.getInstance(application)
+    private val chatRepository = ChatRepository(database)
+    private val geminiRepository = GeminiRepository(application)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    // ────────────────────────────────────────────
-    // Input handling
-    // ────────────────────────────────────────────
+    init {
+        // Load conversations from DB
+        viewModelScope.launch {
+            chatRepository.getAllConversations().collect { conversations ->
+                _uiState.value = _uiState.value.copy(conversations = conversations)
+            }
+        }
+    }
+
     fun onInputChanged(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
-    // ────────────────────────────────────────────
-    // Send message (text only, or text + image)
-    // ────────────────────────────────────────────
     fun onSend() {
         val currentText = _uiState.value.inputText
         val imageUri = _uiState.value.selectedImageUri
+        var conversationId = _uiState.value.currentConversationId
 
         if (currentText.isBlank() && imageUri == null) return
 
@@ -88,66 +89,56 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else -> return
         }
 
-        val userMessage = Message(
-            id = UUID.randomUUID().toString(),
-            text = displayText,
-            isUser = true,
-            timestamp = System.currentTimeMillis()
-        )
-
         _uiState.value = _uiState.value.copy(
-            messages = _uiState.value.messages + userMessage,
             inputText = "",
             isAiThinking = true,
             selectedImageUri = null,
             selectedFileName = null
         )
 
-        val modelName = getModelApiName(_uiState.value.selectedModel)
-        Log.d("ChatViewModel", "Sending to model: $modelName")
-
         viewModelScope.launch {
-            val responseText = if (imageUri != null) {
-                repository.generateResponseWithImage(currentText, imageUri, modelName)
+            // Create conversation if new
+            if (conversationId == null) {
+                val newConv = chatRepository.createNewConversation(displayText)
+                conversationId = newConv.id
+                _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
             } else {
-                repository.generateResponse(currentText, modelName)
+                chatRepository.addMessageToConversation(conversationId, displayText, true)
             }
 
-            val aiMessage = Message(
-                id = UUID.randomUUID().toString(),
-                text = responseText,
-                isUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            _uiState.value = _uiState.value.copy(
-                messages = _uiState.value.messages + aiMessage,
-                isAiThinking = false
-            )
+            // Refresh messages
+            refreshMessages(conversationId)
+
+            val modelName = getModelApiName(_uiState.value.selectedModel)
+            val responseText = if (imageUri != null) {
+                geminiRepository.generateResponseWithImage(currentText, imageUri, modelName)
+            } else {
+                geminiRepository.generateResponse(currentText, modelName)
+            }
+
+            chatRepository.addMessageToConversation(conversationId, responseText, false)
+            refreshMessages(conversationId)
+            
+            _uiState.value = _uiState.value.copy(isAiThinking = false)
         }
     }
 
-    // ────────────────────────────────────────────
-    // Attachment handling
-    // ────────────────────────────────────────────
+    private suspend fun refreshMessages(conversationId: String) {
+        chatRepository.getMessagesForConversation(conversationId).collect { messages ->
+            _uiState.value = _uiState.value.copy(messages = messages)
+        }
+    }
+
     fun onImageSelected(uri: Uri) {
-        _uiState.value = _uiState.value.copy(
-            selectedImageUri = uri,
-            selectedFileName = null
-        )
+        _uiState.value = _uiState.value.copy(selectedImageUri = uri, selectedFileName = null)
     }
 
     fun onFileSelected(uri: Uri, fileName: String) {
-        _uiState.value = _uiState.value.copy(
-            selectedImageUri = uri,
-            selectedFileName = fileName
-        )
+        _uiState.value = _uiState.value.copy(selectedImageUri = uri, selectedFileName = fileName)
     }
 
     fun clearImageSelection() {
-        _uiState.value = _uiState.value.copy(
-            selectedImageUri = null,
-            selectedFileName = null
-        )
+        _uiState.value = _uiState.value.copy(selectedImageUri = null, selectedFileName = null)
     }
 
     fun onAttachmentTap() {
@@ -158,9 +149,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
     }
 
-    // ────────────────────────────────────────────
-    // Voice input (mock)
-    // ────────────────────────────────────────────
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
@@ -172,9 +160,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ────────────────────────────────────────────
-    // Conversation management
-    // ────────────────────────────────────────────
     fun onNewChat() {
         _uiState.value = _uiState.value.copy(
             messages = emptyList(),
@@ -187,37 +172,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSelectConversation(id: String) {
-        val conversation = _uiState.value.conversations.find { it.id == id }
-        if (conversation != null) {
-            _uiState.value = _uiState.value.copy(
-                messages = conversation.messages,
-                currentConversationId = id,
-                isDrawerOpen = false
-            )
+        _uiState.value = _uiState.value.copy(
+            currentConversationId = id,
+            isDrawerOpen = false
+        )
+        viewModelScope.launch {
+            refreshMessages(id)
         }
     }
 
     fun onDeleteConversation(id: String) {
-        _uiState.value = _uiState.value.copy(
-            conversations = _uiState.value.conversations.filter { it.id != id }
-        )
-        if (_uiState.value.currentConversationId == id) {
-            onNewChat()
+        viewModelScope.launch {
+            chatRepository.deleteConversation(id)
+            if (_uiState.value.currentConversationId == id) {
+                onNewChat()
+            }
         }
     }
 
-    // ────────────────────────────────────────────
-    // Drawer
-    // ────────────────────────────────────────────
     fun onToggleDrawer(isOpen: Boolean) {
         _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen)
     }
 
-    // ────────────────────────────────────────────
-    // Model selection
-    // ────────────────────────────────────────────
     fun onModelSelected(model: String) {
-        Log.d("ChatViewModel", "Model selected: $model")
         _uiState.value = _uiState.value.copy(selectedModel = model)
+    }
+
+    fun onToggleTheme() {
+        _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme)
     }
 }

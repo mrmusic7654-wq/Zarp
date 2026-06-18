@@ -34,20 +34,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.KeyManager
 import com.example.ui.components.AttachmentSheet
 import com.example.ui.components.InputBar
 import com.example.ui.components.MessageList
 import com.example.ui.components.SidebarDrawer
+import com.example.ui.theme.ZarpBubbleBg
 import com.example.ui.theme.ZarpMainBg
 import com.example.ui.theme.ZarpTextPrimary
 import com.example.viewmodel.ChatViewModel
@@ -65,8 +70,17 @@ fun ChatScreen(
     val configuration = LocalConfiguration.current
     val drawerWidth = configuration.screenWidthDp.dp * 0.85f
     val snackbarHostState = remember { SnackbarHostState() }
-    var showModelSelector by androidx.compose.runtime.mutableStateOf(false)
+    var showModelSelector by remember { mutableStateOf(false) }
 
+    // Warning if API key is missing
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        if (KeyManager.getApiKey(context).isNullOrBlank()) {
+            snackbarHostState.showSnackbar("API key missing. Set it in Settings → API Key.")
+        }
+    }
+
+    // Drawer open/close sync
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) {
             drawerState.open()
@@ -74,13 +88,14 @@ fun ChatScreen(
             drawerState.close()
         }
     }
-    
+
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen != uiState.isDrawerOpen) {
             viewModel.onToggleDrawer(drawerState.isOpen)
         }
     }
 
+    // File selected toast
     LaunchedEffect(uiState.fileSelected) {
         if (uiState.fileSelected) {
             snackbarHostState.showSnackbar("File selected")
@@ -121,7 +136,7 @@ fun ChatScreen(
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
                 TopAppBar(
-                    title = { 
+                    title = {
                         Box {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -133,7 +148,7 @@ fun ChatScreen(
                                     text = uiState.selectedModel,
                                     color = ZarpTextPrimary,
                                     fontSize = 16.sp,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Icon(
                                     imageVector = Icons.Default.ExpandMore,
@@ -142,22 +157,22 @@ fun ChatScreen(
                                     modifier = Modifier.padding(start = 4.dp).size(20.dp)
                                 )
                             }
-                            
-                            androidx.compose.material3.DropdownMenu(
+
+                            DropdownMenu(
                                 expanded = showModelSelector,
                                 onDismissRequest = { showModelSelector = false },
-                                modifier = Modifier.background(com.example.ui.theme.ZarpBubbleBg)
+                                modifier = Modifier.background(ZarpBubbleBg)
                             ) {
-                                androidx.compose.material3.DropdownMenuItem(
+                                DropdownMenuItem(
                                     text = { Text("Gemini 1.5 Flash", color = ZarpTextPrimary) },
-                                    onClick = { 
+                                    onClick = {
                                         viewModel.onModelSelected("Gemini 1.5 Flash")
                                         showModelSelector = false
                                     }
                                 )
-                                androidx.compose.material3.DropdownMenuItem(
+                                DropdownMenuItem(
                                     text = { Text("Gemini 1.5 Pro", color = ZarpTextPrimary) },
-                                    onClick = { 
+                                    onClick = {
                                         viewModel.onModelSelected("Gemini 1.5 Pro")
                                         showModelSelector = false
                                     }
@@ -208,7 +223,7 @@ fun ChatScreen(
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f)
                 )
-                
+
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },

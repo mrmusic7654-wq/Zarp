@@ -10,7 +10,6 @@ import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 
 class GeminiRepository(private val context: Context) {
 
@@ -54,7 +53,6 @@ class GeminiRepository(private val context: Context) {
         try {
             val response = model.generateContent(content { text(prompt) })
             val rawText = response.text ?: "I couldn't generate a response. Please try again."
-            // Clean the response
             MarkdownFormatter.clean(rawText)
         } catch (e: Exception) {
             Log.e("GeminiRepo", "Error calling Gemini API", e)
@@ -72,7 +70,7 @@ class GeminiRepository(private val context: Context) {
             return@withContext "⚠️ API key not set."
         }
         try {
-            val bitmap = try {
+            val bitmap: Bitmap? = try {
                 context.contentResolver.openInputStream(imageUri)?.use { stream ->
                     BitmapFactory.decodeStream(stream)
                 }
@@ -84,13 +82,9 @@ class GeminiRepository(private val context: Context) {
                 return@withContext "I couldn't process that image. Please try another."
             }
 
-            val baos = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            val imageBytes = baos.toByteArray()
-
             val response = model.generateContent(
                 content {
-                    image(imageBytes)
+                    image(bitmap)  // Fixed: pass Bitmap directly
                     text(prompt.ifBlank { "Describe this image clearly and helpfully." })
                 }
             )

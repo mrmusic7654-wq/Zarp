@@ -32,10 +32,15 @@ import com.example.model.Message
 import com.example.ui.theme.ZarpCodeBg
 import com.example.ui.theme.ZarpDivider
 import com.example.ui.theme.ZarpTextPrimary
+import com.example.ui.theme.ZarpTextSecondary
 import com.example.ui.theme.ZarpTextTertiary
 import kotlinx.coroutines.delay
 
 private val AccentBlue = Color(0xFF75B6FF)
+private val ThinkBg = Color(0xFF1A1A2E)
+private val ThinkBorder = Color(0xFF4A4A7F)
+private val TableBg = Color(0xFF1E1E2E)
+private val CodeHeaderBg = Color(0xFF252540)
 
 @Composable
 fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
@@ -54,12 +59,25 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
     ) {
         SelectionContainer {
             Column {
-                val parts = message.text.split("```")
+                val content = message.text
+
+                // Split by thinking blocks
+                val thinkRegex = Regex("\\[THINKING\\](.*?)\\[\\/THINKING\\]", RegexOption.DOT_MATCHES_ALL)
+                val parts = content.split(thinkRegex)
+                
+                var isFirst = true
+                val matches = thinkRegex.findAll(content).toList()
+                var matchIndex = 0
+
                 parts.forEachIndexed { index, part ->
-                    if (index % 2 == 1) {
-                        CodeBlock(code = part)
-                    } else {
-                        FormattedText(text = part)
+                    if (part.isNotBlank()) {
+                        // Render code blocks within this part
+                        RenderWithCodeBlocks(part)
+                    }
+                    // Insert thinking block after this part if available
+                    if (matchIndex < matches.size) {
+                        DeepThinkBlock(matches[matchIndex].groupValues[1].trim())
+                        matchIndex++
                     }
                 }
             }
@@ -79,10 +97,7 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(
-                    onClick = {},
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Outlined.ThumbUp,
                         contentDescription = "Good response",
@@ -90,10 +105,7 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(
-                    onClick = {},
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Outlined.ThumbDown,
                         contentDescription = "Bad response",
@@ -101,10 +113,7 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(
-                    onClick = {},
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
                     Icon(
                         imageVector = Icons.Outlined.Refresh,
                         contentDescription = "Regenerate",
@@ -118,13 +127,77 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun RenderWithCodeBlocks(text: String) {
+    val parts = text.split("```")
+    parts.forEachIndexed { index, part ->
+        if (index % 2 == 1) {
+            CodeBlock(code = part)
+        } else if (part.isNotBlank()) {
+            FormattedText(text = part)
+        }
+    }
+}
+
+@Composable
+fun DeepThinkBlock(content: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(ThinkBg)
+            .border(1.dp, ThinkBorder, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🧠", fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Deep Think",
+                    color = Color(0xFF9B9BFF),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = content,
+                color = Color(0xFFC0C0E0),
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
+@Composable
 fun FormattedText(text: String) {
     val formattedText = buildAnnotatedString {
         var remaining = text.trim()
 
         while (remaining.isNotEmpty()) {
             when {
-                // Bold text **...**
+                // Code inline
+                remaining.startsWith("`") -> {
+                    val end = remaining.indexOf("`", 1)
+                    if (end != -1) {
+                        withStyle(SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = Color(0xFF2A2A40),
+                            color = Color(0xFFE0A0FF),
+                            fontSize = 13.sp
+                        )) {
+                            append(remaining.substring(1, end))
+                        }
+                        remaining = remaining.substring(end + 1)
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
+                }
+                // Bold
                 remaining.startsWith("**") -> {
                     val end = remaining.indexOf("**", 2)
                     if (end != -1) {
@@ -137,7 +210,7 @@ fun FormattedText(text: String) {
                         remaining = remaining.substring(1)
                     }
                 }
-                // Italic text *...*
+                // Italic
                 remaining.startsWith("*") -> {
                     val end = remaining.indexOf("*", 1)
                     if (end != -1) {
@@ -150,7 +223,20 @@ fun FormattedText(text: String) {
                         remaining = remaining.substring(1)
                     }
                 }
-                // Bullet points (• or -)
+                // Table row
+                remaining.startsWith("|") -> {
+                    val newline = remaining.indexOf("\n")
+                    val line = if (newline != -1) remaining.substring(0, newline) else remaining
+                    withStyle(SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = Color(0xFFC0C0FF)
+                    )) {
+                        append(line)
+                    }
+                    remaining = if (newline != -1) remaining.substring(newline) else ""
+                }
+                // Bullet
                 remaining.startsWith("• ") || remaining.startsWith("- ") -> {
                     withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
                         append("  •  ")
@@ -158,9 +244,9 @@ fun FormattedText(text: String) {
                     remaining = remaining.substring(2)
                 }
                 // Numbered list
-                remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") < 5 -> {
+                remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") in 1..3 -> {
                     val dotIndex = remaining.indexOf(". ")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AccentBlue)) {
                         append(remaining.substring(0, dotIndex + 2))
                     }
                     remaining = remaining.substring(dotIndex + 2)
@@ -184,55 +270,61 @@ fun FormattedText(text: String) {
 @Composable
 fun CodeBlock(code: String) {
     val clipboardManager = LocalClipboardManager.current
-    val languageAndCode = code.split("\n", limit = 2)
-    val lang = if (languageAndCode.size > 1) languageAndCode[0].trim() else "code"
-    val actualCode = if (languageAndCode.size > 1) languageAndCode[1].trim() else code.trim()
+    val lines = code.split("\n")
+    val lang = lines.firstOrNull()?.trim()?.takeIf { it.length < 20 } ?: "code"
+    val actualCode = if (lines.size > 1 && lines.first().trim().length < 20) 
+        lines.drop(1).joinToString("\n").trim() 
+    else 
+        code.trim()
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(ZarpCodeBg)
-            .border(1.dp, ZarpDivider, RoundedCornerShape(8.dp))
+            .border(1.dp, ZarpDivider, RoundedCornerShape(12.dp))
     ) {
         Column {
-            // Header with language and copy button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .background(CodeHeaderBg)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = lang,
-                    color = ZarpTextTertiary,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📄", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = lang,
+                        color = ZarpTextSecondary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
                 IconButton(
                     onClick = { clipboardManager.setText(AnnotatedString(actualCode)) },
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.ContentCopy,
                         contentDescription = "Copy code",
-                        tint = ZarpTextTertiary,
+                        tint = ZarpTextSecondary,
                         modifier = Modifier.size(14.dp)
                     )
                 }
             }
-
-            // Code content
             SelectionContainer {
                 Text(
                     text = actualCode,
-                    color = ZarpTextPrimary,
+                    color = Color(0xFFD4D4FF),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(12.dp)
                 )
             }
         }

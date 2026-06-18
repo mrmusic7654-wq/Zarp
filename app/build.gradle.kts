@@ -76,6 +76,7 @@ dependencies {
   // implementation(libs.androidx.camera.core)
   // implementation(libs.androidx.camera.lifecycle)
   // implementation(libs.androidx.camera.view)
+  implementation("androidx.security:security-crypto:1.1.0-alpha06")
   implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)

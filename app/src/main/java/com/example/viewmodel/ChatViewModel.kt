@@ -29,25 +29,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val showAttachmentSheet: Boolean = false,
         val selectedImageUri: Uri? = null,
         val selectedFileName: String? = null,
-        val selectedModel: String = "Gemini 2.0 Flash"
+        val selectedModel: String = "Gemini 2.5 Flash"
     )
 
     companion object {
+        // ────────────────────────────────────────────
+        // Free-tier models confirmed by Gemini API
+        // ────────────────────────────────────────────
         val availableModels = listOf(
-            "Gemini 2.0 Flash",
+            "Gemini 3 Flash Preview",
+            "Gemini 3.1 Flash Lite Preview",
             "Gemini 2.5 Flash",
-            "Gemini 2.5 Pro",
-            "Gemini 1.5 Flash",
-            "Gemini 1.5 Pro"
+            "Gemini 2.5 Flash-Lite",
+            "Gemini 2.0 Flash",
+            "Gemini 2.0 Flash-Lite",
+            "Gemma 4 26B",
+            "Gemma 4 31B"
         )
 
         fun getModelApiName(displayName: String): String = when (displayName) {
-            "Gemini 2.0 Flash" -> "gemini-2.0-flash"
-            "Gemini 2.5 Flash" -> "gemini-2.5-flash"
-            "Gemini 2.5 Pro" -> "gemini-2.5-pro"
-            "Gemini 1.5 Flash" -> "gemini-1.5-flash"
-            "Gemini 1.5 Pro" -> "gemini-1.5-pro"
-            else -> "gemini-2.0-flash"
+            "Gemini 3 Flash Preview"          -> "gemini-3-flash-preview"
+            "Gemini 3.1 Flash Lite Preview"  -> "gemini-3.1-flash-lite-preview"
+            "Gemini 2.5 Flash"                -> "gemini-2.5-flash"
+            "Gemini 2.5 Flash-Lite"           -> "gemini-2.5-flash-lite"
+            "Gemini 2.0 Flash"                -> "gemini-2.0-flash"
+            "Gemini 2.0 Flash-Lite"           -> "gemini-2.0-flash-lite"
+            "Gemma 4 26B"                     -> "gemma-4-26b-a4b-it"
+            "Gemma 4 31B"                     -> "gemma-4-31b-it"
+            else -> "gemini-2.5-flash"
         }
     }
 
@@ -56,10 +65,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // ────────────────────────────────────────────
+    // Input handling
+    // ────────────────────────────────────────────
     fun onInputChanged(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
+    // ────────────────────────────────────────────
+    // Send message (text only, or text + image)
+    // ────────────────────────────────────────────
     fun onSend() {
         val currentText = _uiState.value.inputText
         val imageUri = _uiState.value.selectedImageUri
@@ -89,6 +104,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val modelName = getModelApiName(_uiState.value.selectedModel)
+        Log.d("ChatViewModel", "Sending to model: $modelName")
 
         viewModelScope.launch {
             val responseText = if (imageUri != null) {
@@ -96,7 +112,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 repository.generateResponse(currentText, modelName)
             }
-            
+
             val aiMessage = Message(
                 id = UUID.randomUUID().toString(),
                 text = responseText,
@@ -110,6 +126,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ────────────────────────────────────────────
+    // Attachment handling
+    // ────────────────────────────────────────────
     fun onImageSelected(uri: Uri) {
         _uiState.value = _uiState.value.copy(
             selectedImageUri = uri,
@@ -124,6 +143,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun clearImageSelection() {
+        _uiState.value = _uiState.value.copy(
+            selectedImageUri = null,
+            selectedFileName = null
+        )
+    }
+
+    fun onAttachmentTap() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = true)
+    }
+
+    fun dismissAttachmentSheet() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
+    }
+
+    // ────────────────────────────────────────────
+    // Voice input (mock)
+    // ────────────────────────────────────────────
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
@@ -135,6 +172,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ────────────────────────────────────────────
+    // Conversation management
+    // ────────────────────────────────────────────
     fun onNewChat() {
         _uiState.value = _uiState.value.copy(
             messages = emptyList(),
@@ -166,26 +206,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ────────────────────────────────────────────
+    // Drawer
+    // ────────────────────────────────────────────
     fun onToggleDrawer(isOpen: Boolean) {
         _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen)
     }
 
-    fun onAttachmentTap() {
-        _uiState.value = _uiState.value.copy(showAttachmentSheet = true)
-    }
-
-    fun dismissAttachmentSheet() {
-        _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
-    }
-
-    fun clearImageSelection() {
-        _uiState.value = _uiState.value.copy(
-            selectedImageUri = null,
-            selectedFileName = null
-        )
-    }
-
+    // ────────────────────────────────────────────
+    // Model selection
+    // ────────────────────────────────────────────
     fun onModelSelected(model: String) {
+        Log.d("ChatViewModel", "Model selected: $model")
         _uiState.value = _uiState.value.copy(selectedModel = model)
     }
 }

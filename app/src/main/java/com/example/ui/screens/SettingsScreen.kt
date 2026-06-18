@@ -12,20 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,7 +28,8 @@ import com.example.ui.theme.ZarpTextTertiary
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToApiKey: () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -77,6 +66,7 @@ fun SettingsScreen(
 
             SettingsSectionTitle("Data & Privacy")
             SettingsItemToggle("Chat history", true)
+            SettingsItemAction("API Key") { onNavigateToApiKey() }
             SettingsItemAction("Export data")
             SettingsItemAction("Delete account", Color.Red)
 
@@ -137,46 +127,16 @@ fun SettingsItemToggle(title: String, initialValue: Boolean) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(
-    onNavigateBack: () -> Unit,
-    onNavigateToApiKey: () -> Unit    // <-- new parameter
+fun SettingsItemAction(
+    title: String,
+    textColor: Color = ZarpTextPrimary,
+    onClick: () -> Unit = {}
 ) {
-    // ... rest unchanged ...
-
-    Column(modifier = ...) {
-        // ... existing sections ...
-
-        SettingsSectionTitle("Data & Privacy")
-        SettingsItemToggle("Chat history", true)
-        SettingsItemAction("API Key") {          // <-- new item
-            onNavigateToApiKey()
-        }
-        SettingsItemAction("Export data")
-        // ...
-    }
-}
-
-// Also update the SettingsItemAction to accept onClick:
-@Composable
-fun SettingsItemAction(title: String, textColor: Color = ZarpTextPrimary, onClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = title, color = textColor, fontSize = 16.sp, modifier = Modifier.weight(1f))
-    }
-}
-@Composable
-fun SettingsItemAction(title: String, textColor: Color = ZarpTextPrimary) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

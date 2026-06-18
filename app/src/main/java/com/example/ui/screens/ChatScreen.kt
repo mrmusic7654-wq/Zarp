@@ -53,6 +53,7 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showModelSelector by remember { mutableStateOf(false) }
 
+    // Show warning if API key is missing
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
@@ -60,6 +61,7 @@ fun ChatScreen(
         }
     }
 
+    // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) {
             drawerState.open()
@@ -74,6 +76,7 @@ fun ChatScreen(
         }
     }
 
+    // File selected toast
     LaunchedEffect(uiState.fileSelected) {
         if (uiState.fileSelected) {
             snackbarHostState.showSnackbar("File selected")
@@ -81,6 +84,7 @@ fun ChatScreen(
         }
     }
 
+    // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -132,7 +136,9 @@ fun ChatScreen(
                                     imageVector = Icons.Default.ExpandMore,
                                     contentDescription = "Select Model",
                                     tint = ZarpTextPrimary,
-                                    modifier = Modifier.padding(start = 4.dp).size(20.dp)
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(20.dp)
                                 )
                             }
 
@@ -141,20 +147,21 @@ fun ChatScreen(
                                 onDismissRequest = { showModelSelector = false },
                                 modifier = Modifier.background(ZarpBubbleBg)
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Gemini 1.5 Flash", color = ZarpTextPrimary) },
-                                    onClick = {
-                                        viewModel.onModelSelected("Gemini 1.5 Flash")
-                                        showModelSelector = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Gemini 1.5 Pro", color = ZarpTextPrimary) },
-                                    onClick = {
-                                        viewModel.onModelSelected("Gemini 1.5 Pro")
-                                        showModelSelector = false
-                                    }
-                                )
+                                ChatViewModel.availableModels.forEach { model ->
+                                    DropdownMenuItem(
+                                        text = { 
+                                            Text(
+                                                text = model, 
+                                                color = ZarpTextPrimary
+                                            ) 
+                                        },
+                                        onClick = {
+                                            viewModel.onModelSelected(model)
+                                            showModelSelector = false
+                                        },
+                                        modifier = Modifier.background(ZarpBubbleBg)
+                                    )
+                                }
                             }
                         }
                     },
@@ -175,7 +182,7 @@ fun ChatScreen(
                                 tint = ZarpTextPrimary
                             )
                         }
-                        IconButton(onClick = { /* mock dropdown */ }) {
+                        IconButton(onClick = { /* Options menu */ }) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "Options",
@@ -196,12 +203,14 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
+                // Messages list
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f)
                 )
 
+                // Input bar
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
@@ -213,6 +222,7 @@ fun ChatScreen(
             }
         }
 
+        // Attachment bottom sheet
         if (uiState.showAttachmentSheet) {
             AttachmentSheet(
                 onDismiss = { viewModel.dismissAttachmentSheet() },

@@ -19,11 +19,11 @@ class GeminiRepository(private val context: Context) {
     suspend fun generateResponse(prompt: String): String = withContext(Dispatchers.IO) {
         val model = getModel()
         if (model == null) {
-            return@withContext "API key not set. Please go to Settings → API Key to add your key."
+            return@withContext "⚠️ API key not set. Go to **Settings → API Key** to add your Gemini key."
         }
         try {
             val response = model.generateContent(content { text(prompt) })
-            response.text ?: "I couldn’t generate a response."
+            response.text ?: "I couldn’t generate a response. Please try again."
         } catch (e: Exception) {
             "Error: ${e.localizedMessage ?: "Something went wrong"}"
         }

@@ -8,16 +8,16 @@ import kotlinx.coroutines.withContext
 
 class GeminiRepository(private val context: Context) {
 
-    private fun getModel(): GenerativeModel? {
+    private fun getModel(modelName: String): GenerativeModel? {
         val key = KeyManager.getApiKey(context) ?: return null
         return GenerativeModel(
-            modelName = "gemini-1.5-flash",
+            modelName = modelName,      // e.g., "gemini-3.0-flash-latest"
             apiKey = key
         )
     }
 
-    suspend fun generateResponse(prompt: String): String = withContext(Dispatchers.IO) {
-        val model = getModel()
+    suspend fun generateResponse(prompt: String, modelName: String): String = withContext(Dispatchers.IO) {
+        val model = getModel(modelName)
         if (model == null) {
             return@withContext "⚠️ API key not set. Go to **Settings → API Key** to add your Gemini key."
         }

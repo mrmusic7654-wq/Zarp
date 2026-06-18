@@ -32,9 +32,10 @@ import com.example.model.Message
 import com.example.ui.theme.ZarpCodeBg
 import com.example.ui.theme.ZarpDivider
 import com.example.ui.theme.ZarpTextPrimary
-import com.example.ui.theme.ZarpTextSecondary
 import com.example.ui.theme.ZarpTextTertiary
 import kotlinx.coroutines.delay
+
+private val AccentBlue = Color(0xFF75B6FF)
 
 @Composable
 fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
@@ -56,10 +57,8 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                 val parts = message.text.split("```")
                 parts.forEachIndexed { index, part ->
                     if (index % 2 == 1) {
-                        // Code block
                         CodeBlock(code = part)
                     } else {
-                        // Regular text with formatting
                         FormattedText(text = part)
                     }
                 }
@@ -75,12 +74,15 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.ContentCopy,
-                        contentDescription = "Copy",
+                        contentDescription = "Copy response",
                         tint = ZarpTextTertiary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
+                IconButton(
+                    onClick = {},
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.ThumbUp,
                         contentDescription = "Good response",
@@ -88,7 +90,10 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
+                IconButton(
+                    onClick = {},
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.ThumbDown,
                         contentDescription = "Bad response",
@@ -96,7 +101,10 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
+                IconButton(
+                    onClick = {},
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.Refresh,
                         contentDescription = "Regenerate",
@@ -113,7 +121,7 @@ fun AiMessageContent(message: Message, modifier: Modifier = Modifier) {
 fun FormattedText(text: String) {
     val formattedText = buildAnnotatedString {
         var remaining = text.trim()
-        
+
         while (remaining.isNotEmpty()) {
             when {
                 // Bold text **...**
@@ -142,12 +150,20 @@ fun FormattedText(text: String) {
                         remaining = remaining.substring(1)
                     }
                 }
-                // Bullet points
+                // Bullet points (• or -)
                 remaining.startsWith("• ") || remaining.startsWith("- ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = ZarpAccent)) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
                         append("  •  ")
                     }
                     remaining = remaining.substring(2)
+                }
+                // Numbered list
+                remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") < 5 -> {
+                    val dotIndex = remaining.indexOf(". ")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
+                        append(remaining.substring(0, dotIndex + 2))
+                    }
+                    remaining = remaining.substring(dotIndex + 2)
                 }
                 else -> {
                     append(remaining[0])
@@ -156,7 +172,7 @@ fun FormattedText(text: String) {
             }
         }
     }
-    
+
     Text(
         text = formattedText,
         fontSize = 15.sp,
@@ -170,7 +186,7 @@ fun CodeBlock(code: String) {
     val clipboardManager = LocalClipboardManager.current
     val languageAndCode = code.split("\n", limit = 2)
     val lang = if (languageAndCode.size > 1) languageAndCode[0].trim() else "code"
-    val actualCode = if (languageAndCode.size > 1) languageAndCode[1] else code
+    val actualCode = if (languageAndCode.size > 1) languageAndCode[1].trim() else code.trim()
 
     Box(
         modifier = Modifier
@@ -181,6 +197,7 @@ fun CodeBlock(code: String) {
             .border(1.dp, ZarpDivider, RoundedCornerShape(8.dp))
     ) {
         Column {
+            // Header with language and copy button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -195,7 +212,7 @@ fun CodeBlock(code: String) {
                     fontFamily = FontFamily.Monospace
                 )
                 IconButton(
-                    onClick = { clipboardManager.setText(AnnotatedString(actualCode.trim())) },
+                    onClick = { clipboardManager.setText(AnnotatedString(actualCode)) },
                     modifier = Modifier.size(20.dp)
                 ) {
                     Icon(
@@ -206,9 +223,11 @@ fun CodeBlock(code: String) {
                     )
                 }
             }
+
+            // Code content
             SelectionContainer {
                 Text(
-                    text = actualCode.trim(),
+                    text = actualCode,
                     color = ZarpTextPrimary,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,

@@ -1,5 +1,8 @@
 package com.example.ui.components
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,19 +26,56 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.ui.theme.ZarpSidebarBg
 import com.example.ui.theme.ZarpTextPrimary
 import com.example.ui.theme.ZarpTextTertiary
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachmentSheet(
     onDismiss: () -> Unit,
-    onFileSelected: () -> Unit
+    onImageSelected: (Uri) -> Unit,
+    onFileSelected: (Uri, String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
+    val context = LocalContext.current
+
+    // Camera launcher
+    val cameraUri = remember { 
+        val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+    
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) onImageSelected(cameraUri)
+    }
+
+    // Gallery launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { onImageSelected(it) }
+    }
+
+    // File picker launcher
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { 
+            val name = context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                cursor.moveToFirst()
+                cursor.getString(cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME))
+            } ?: "File"
+            onFileSelected(it, name)
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -50,23 +90,32 @@ fun AttachmentSheet(
             AttachmentOption(
                 icon = Icons.Outlined.CameraAlt,
                 text = "Camera",
-                onClick = onFileSelected
+                onClick = {
+                    cameraLauncher.launch(cameraUri)
+                    onDismiss()
+                }
             )
             AttachmentOption(
                 icon = Icons.Outlined.PhotoLibrary,
                 text = "Photo & Video Library",
-                onClick = onFileSelected
+                onClick = {
+                    galleryLauncher.launch("image/*")
+                    onDismiss()
+                }
             )
             AttachmentOption(
                 icon = Icons.AutoMirrored.Outlined.InsertDriveFile,
                 text = "File",
-                onClick = onFileSelected
+                onClick = {
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                    onDismiss()
+                }
             )
             Spacer(modifier = Modifier.height(16.dp))
             AttachmentOption(
-                icon = Icons.Rounded.Folder, // Placeholder for drive icon
+                icon = Icons.Rounded.Folder,
                 text = "Connect to Google Drive",
-                onClick = onFileSelected
+                onClick = onDismiss
             )
         }
     }

@@ -1,22 +1,29 @@
 package com.example.data
 
+import android.content.Context
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-class GeminiRepository(apiKey: String) {
-    private val generativeModel = GenerativeModel(
-        modelName = "gemini-1.5-flash",   // free tier
-        apiKey = apiKey
-    )
+class GeminiRepository(private val context: Context) {
+
+    private fun getModel(): GenerativeModel? {
+        val key = KeyManager.getApiKey(context) ?: return null
+        return GenerativeModel(
+            modelName = "gemini-1.5-flash",
+            apiKey = key
+        )
+    }
 
     suspend fun generateResponse(prompt: String): String = withContext(Dispatchers.IO) {
+        val model = getModel()
+        if (model == null) {
+            return@withContext "API key not set. Please go to Settings → API Key to add your key."
+        }
         try {
-            val response = generativeModel.generateContent(
-                content { text(prompt) }
-            )
-            response.text ?: "I couldn’t generate a response. Please try again."
+            val response = model.generateContent(content { text(prompt) })
+            response.text ?: "I couldn’t generate a response."
         } catch (e: Exception) {
             "Error: ${e.localizedMessage ?: "Something went wrong"}"
         }

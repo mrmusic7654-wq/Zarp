@@ -1,19 +1,20 @@
 package com.example.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
 import com.example.data.GeminiRepository
 import com.example.data.MockData
 import com.example.model.Conversation
 import com.example.model.Message
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-class ChatViewModel : ViewModel() {
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     data class ChatUiState(
         val messages: List<Message> = emptyList(),
@@ -28,7 +29,7 @@ class ChatViewModel : ViewModel() {
         val selectedModel: String = "Gemini 1.5 Flash"
     )
 
-    private val repository = GeminiRepository(BuildConfig.GEMINI_API_KEY)
+    private val repository = GeminiRepository(application)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -55,7 +56,6 @@ class ChatViewModel : ViewModel() {
             fileSelected = false
         )
 
-        // Real Gemini API call
         viewModelScope.launch {
             val responseText = repository.generateResponse(currentText)
             val aiMessage = Message(
@@ -74,7 +74,7 @@ class ChatViewModel : ViewModel() {
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
-            kotlinx.coroutines.delay(2000)
+            delay(2000)
             _uiState.value = _uiState.value.copy(
                 isListening = false,
                 inputText = "What's the weather like today?"

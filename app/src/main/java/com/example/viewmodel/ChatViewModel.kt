@@ -26,8 +26,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val isDrawerOpen: Boolean = false,
         val showAttachmentSheet: Boolean = false,
         val fileSelected: Boolean = false,
-        val selectedModel: String = "Gemini 1.5 Flash"
+        val selectedModel: String = "Gemini 3 Flash"    // default free tier model
     )
+
+    // Available models (display name -> API model string)
+    companion object {
+        val availableModels = listOf(
+            "Gemini 3 Flash",
+            "Gemini 3.1 Flash-Lite",
+            "Gemini 2.5 Flash",
+            "Gemini 2.5 Pro",
+            "Gemini 2.0 Flash"
+        )
+
+        fun getModelApiName(displayName: String): String = when (displayName) {
+            "Gemini 3 Flash" -> "gemini-3.0-flash-latest"
+            "Gemini 3.1 Flash-Lite" -> "gemini-3.1-flash-lite-latest"
+            "Gemini 2.5 Flash" -> "gemini-2.5-flash-latest"
+            "Gemini 2.5 Pro" -> "gemini-2.5-pro-latest"
+            "Gemini 2.0 Flash" -> "gemini-2.0-flash"
+            else -> "gemini-3.0-flash-latest"
+        }
+    }
 
     private val repository = GeminiRepository(application)
 
@@ -56,8 +76,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             fileSelected = false
         )
 
+        val modelName = getModelApiName(_uiState.value.selectedModel)
+
         viewModelScope.launch {
-            val responseText = repository.generateResponse(currentText)
+            val responseText = repository.generateResponse(currentText, modelName)
             val aiMessage = Message(
                 id = UUID.randomUUID().toString(),
                 text = responseText,

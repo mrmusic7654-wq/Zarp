@@ -1,18 +1,13 @@
 package com.example.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -21,18 +16,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.data.KeyManager
 import com.example.ui.components.AttachmentSheet
 import com.example.ui.components.InputBar
 import com.example.ui.components.MessageList
 import com.example.ui.components.SidebarDrawer
+import com.example.ui.theme.ZarpAccent
 import com.example.ui.theme.ZarpBubbleBg
 import com.example.ui.theme.ZarpMainBg
 import com.example.ui.theme.ZarpTextPrimary
@@ -53,7 +52,6 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showModelSelector by remember { mutableStateOf(false) }
 
-    // Show warning if API key is missing
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
@@ -61,7 +59,6 @@ fun ChatScreen(
         }
     }
 
-    // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) {
             drawerState.open()
@@ -76,15 +73,6 @@ fun ChatScreen(
         }
     }
 
-    // File selected toast
-    LaunchedEffect(uiState.fileSelected) {
-        if (uiState.fileSelected) {
-            snackbarHostState.showSnackbar("File selected")
-            viewModel.onRemoveFile()
-        }
-    }
-
-    // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -136,30 +124,21 @@ fun ChatScreen(
                                     imageVector = Icons.Default.ExpandMore,
                                     contentDescription = "Select Model",
                                     tint = ZarpTextPrimary,
-                                    modifier = Modifier
-                                        .padding(start = 4.dp)
-                                        .size(20.dp)
+                                    modifier = Modifier.padding(start = 4.dp).size(20.dp)
                                 )
                             }
 
                             DropdownMenu(
                                 expanded = showModelSelector,
-                                onDismissRequest = { showModelSelector = false },
-                                modifier = Modifier.background(ZarpBubbleBg)
+                                onDismissRequest = { showModelSelector = false }
                             ) {
                                 ChatViewModel.availableModels.forEach { model ->
                                     DropdownMenuItem(
-                                        text = { 
-                                            Text(
-                                                text = model, 
-                                                color = ZarpTextPrimary
-                                            ) 
-                                        },
+                                        text = { Text(model) },
                                         onClick = {
                                             viewModel.onModelSelected(model)
                                             showModelSelector = false
-                                        },
-                                        modifier = Modifier.background(ZarpBubbleBg)
+                                        }
                                     )
                                 }
                             }
@@ -182,7 +161,7 @@ fun ChatScreen(
                                 tint = ZarpTextPrimary
                             )
                         }
-                        IconButton(onClick = { /* Options menu */ }) {
+                        IconButton(onClick = { }) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "Options",
@@ -203,14 +182,21 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Messages list
+                // Image preview
+                if (uiState.selectedImageUri != null) {
+                    ImagePreviewBar(
+                        uri = uiState.selectedImageUri,
+                        fileName = uiState.selectedFileName,
+                        onRemove = { viewModel.clearImageSelection() }
+                    )
+                }
+
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f)
                 )
 
-                // Input bar
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
@@ -222,11 +208,53 @@ fun ChatScreen(
             }
         }
 
-        // Attachment bottom sheet
         if (uiState.showAttachmentSheet) {
             AttachmentSheet(
                 onDismiss = { viewModel.dismissAttachmentSheet() },
-                onFileSelected = { viewModel.onFileSelected() }
+                onImageSelected = { uri ->
+                    viewModel.onImageSelected(uri)
+                },
+                onFileSelected = { uri, name ->
+                    viewModel.onFileSelected(uri, name)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun ImagePreviewBar(
+    uri: Uri,
+    fileName: String?,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ZarpBubbleBg)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = uri,
+            contentDescription = "Attached image",
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = fileName ?: "Image attached",
+            color = ZarpTextPrimary,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Remove",
+                tint = ZarpTextPrimary
             )
         }
     }

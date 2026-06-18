@@ -31,7 +31,6 @@ import com.example.ui.components.AttachmentSheet
 import com.example.ui.components.InputBar
 import com.example.ui.components.MessageList
 import com.example.ui.components.SidebarDrawer
-import com.example.ui.theme.ZarpAccent
 import com.example.ui.theme.ZarpBubbleBg
 import com.example.ui.theme.ZarpMainBg
 import com.example.ui.theme.ZarpTextPrimary
@@ -52,6 +51,7 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showModelSelector by remember { mutableStateOf(false) }
 
+    // Show warning if API key is missing
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
@@ -59,6 +59,7 @@ fun ChatScreen(
         }
     }
 
+    // Sync drawer state with ViewModel
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) {
             drawerState.open()
@@ -73,6 +74,7 @@ fun ChatScreen(
         }
     }
 
+    // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
@@ -124,7 +126,9 @@ fun ChatScreen(
                                     imageVector = Icons.Default.ExpandMore,
                                     contentDescription = "Select Model",
                                     tint = ZarpTextPrimary,
-                                    modifier = Modifier.padding(start = 4.dp).size(20.dp)
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(20.dp)
                                 )
                             }
 
@@ -161,7 +165,7 @@ fun ChatScreen(
                                 tint = ZarpTextPrimary
                             )
                         }
-                        IconButton(onClick = { }) {
+                        IconButton(onClick = { /* Options menu */ }) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "Options",
@@ -182,21 +186,24 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Image preview
-                if (uiState.selectedImageUri != null) {
+                // Image/file preview bar
+                val selectedUri = uiState.selectedImageUri
+                if (selectedUri != null) {
                     ImagePreviewBar(
-                        uri = uiState.selectedImageUri,
+                        uri = selectedUri,
                         fileName = uiState.selectedFileName,
                         onRemove = { viewModel.clearImageSelection() }
                     )
                 }
 
+                // Messages list
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f)
                 )
 
+                // Input bar
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
@@ -208,6 +215,7 @@ fun ChatScreen(
             }
         }
 
+        // Attachment bottom sheet
         if (uiState.showAttachmentSheet) {
             AttachmentSheet(
                 onDismiss = { viewModel.dismissAttachmentSheet() },
@@ -232,7 +240,7 @@ fun ImagePreviewBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(ZarpBubbleBg)
-            .padding(8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
@@ -243,17 +251,20 @@ fun ImagePreviewBar(
                 .clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = fileName ?: "Image attached",
             color = ZarpTextPrimary,
             fontSize = 14.sp,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(32.dp)
+        ) {
             Icon(
                 imageVector = Icons.Default.Close,
-                contentDescription = "Remove",
+                contentDescription = "Remove attachment",
                 tint = ZarpTextPrimary
             )
         }

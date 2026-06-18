@@ -20,36 +20,39 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.ZarpAccent
-import com.example.ui.theme.ZarpMainBg
-import com.example.ui.theme.ZarpTextPrimary
-import com.example.ui.theme.ZarpTextTertiary
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.theme.*
+import com.example.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToApiKey: () -> Unit
+    onNavigateToApiKey: () -> Unit,
+    viewModel: ChatViewModel = viewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+    val isDark = uiState.isDarkTheme
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "Settings", color = ZarpTextPrimary, fontSize = 20.sp) },
+                title = { Text("Settings", color = if (isDark) ZarpTextPrimary else LightTextPrimary, fontSize = 20.sp) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = ZarpTextPrimary
+                            tint = if (isDark) ZarpTextPrimary else LightTextPrimary
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = ZarpMainBg
+                    containerColor = if (isDark) ZarpMainBg else LightMainBg
                 )
             )
         },
-        containerColor = ZarpMainBg
+        containerColor = if (isDark) ZarpMainBg else LightMainBg
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -57,34 +60,42 @@ fun SettingsScreen(
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
         ) {
-            SettingsSectionTitle("General")
-            SettingsItemValue("Theme", "System")
-            SettingsItemToggle("Haptic feedback", true)
-            SettingsItemValue("Language", "English")
+            SettingsSectionTitle("Appearance", isDark)
+            SettingsItemToggle(
+                title = "Dark Mode",
+                initialValue = isDark,
+                onToggle = { viewModel.onToggleTheme() },
+                isDark = isDark
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            SettingsSectionTitle("Data & Privacy")
-            SettingsItemToggle("Chat history", true)
-            SettingsItemAction("API Key") { onNavigateToApiKey() }
-            SettingsItemAction("Export data")
-            SettingsItemAction("Delete account", Color.Red)
+            SettingsSectionTitle("General", isDark)
+            SettingsItemValue("Language", "English", isDark)
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            SettingsSectionTitle("About")
-            SettingsItemValue("Version", "1.0.0")
-            SettingsItemAction("Terms of use")
-            SettingsItemAction("Privacy policy")
+            SettingsSectionTitle("Data & Privacy", isDark)
+            SettingsItemToggle("Chat history", true, {}, isDark)
+            SettingsItemAction("API Key", isDark) { onNavigateToApiKey() }
+            SettingsItemAction("Export data", isDark)
+            SettingsItemAction("Delete account", isDark, Color.Red)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            SettingsSectionTitle("About", isDark)
+            SettingsItemValue("Version", "1.0.0", isDark)
+            SettingsItemAction("Terms of use", isDark)
+            SettingsItemAction("Privacy policy", isDark)
         }
     }
 }
 
 @Composable
-fun SettingsSectionTitle(title: String) {
+fun SettingsSectionTitle(title: String, isDark: Boolean) {
     Text(
         text = title,
-        color = ZarpTextTertiary,
+        color = if (isDark) ZarpTextTertiary else LightTextTertiary,
         fontSize = 14.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp)
@@ -92,36 +103,63 @@ fun SettingsSectionTitle(title: String) {
 }
 
 @Composable
-fun SettingsItemValue(title: String, value: String) {
+fun SettingsItemValue(title: String, value: String, isDark: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = title, color = ZarpTextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
-        Text(text = value, color = ZarpTextTertiary, fontSize = 16.sp)
+        Text(
+            text = title,
+            color = if (isDark) ZarpTextPrimary else LightTextPrimary,
+            fontSize = 16.sp,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = value,
+            color = if (isDark) ZarpTextTertiary else LightTextTertiary,
+            fontSize = 16.sp
+        )
     }
 }
 
 @Composable
-fun SettingsItemToggle(title: String, initialValue: Boolean) {
+fun SettingsItemToggle(
+    title: String,
+    initialValue: Boolean,
+    onToggle: (Boolean) -> Unit = {},
+    isDark: Boolean
+) {
     var checked by remember { mutableStateOf(initialValue) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { checked = !checked }
+            .clickable {
+                checked = !checked
+                onToggle(checked)
+            }
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = title, color = ZarpTextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(
+            text = title,
+            color = if (isDark) ZarpTextPrimary else LightTextPrimary,
+            fontSize = 16.sp,
+            modifier = Modifier.weight(1f)
+        )
         Switch(
             checked = checked,
-            onCheckedChange = { checked = it },
+            onCheckedChange = {
+                checked = it
+                onToggle(it)
+            },
             colors = SwitchDefaults.colors(
-                checkedThumbColor = ZarpMainBg,
-                checkedTrackColor = ZarpAccent
+                checkedThumbColor = Color.White,
+                checkedTrackColor = if (isDark) ZarpAccent else LightAccent,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = if (isDark) ZarpDivider else LightDivider
             )
         )
     }
@@ -130,7 +168,8 @@ fun SettingsItemToggle(title: String, initialValue: Boolean) {
 @Composable
 fun SettingsItemAction(
     title: String,
-    textColor: Color = ZarpTextPrimary,
+    isDark: Boolean,
+    textColor: Color = if (isDark) ZarpTextPrimary else LightTextPrimary,
     onClick: () -> Unit = {}
 ) {
     Row(
@@ -140,6 +179,6 @@ fun SettingsItemAction(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = title, color = textColor, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(text = title, color = textColor, fontSize = 16.sp)
     }
 }

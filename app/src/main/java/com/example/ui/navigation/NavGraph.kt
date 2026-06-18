@@ -22,8 +22,7 @@ fun AppNavGraph() {
     ) {
         composable("chat") {
             ChatScreen(
-                onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToApiKey = { navController.navigate("api_key") }
+                onNavigateToSettings = { navController.navigate("settings") }
             )
         }
         composable("settings") {

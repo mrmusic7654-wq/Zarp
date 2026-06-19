@@ -28,7 +28,7 @@ import com.example.viewmodel.ChatViewModel
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToApiKey: () -> Unit,
+    onNavigateToApiKeys: () -> Unit,
     viewModel: ChatViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -75,9 +75,13 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            SettingsSectionTitle("API & Integrations", isDark)
+            SettingsItemAction("API Keys", isDark) { onNavigateToApiKeys() }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             SettingsSectionTitle("Data & Privacy", isDark)
             SettingsItemToggle("Chat history", true, {}, isDark)
-            SettingsItemAction("API Key", isDark) { onNavigateToApiKey() }
             SettingsItemAction("Export data", isDark)
             SettingsItemAction("Delete account", isDark, Color.Red)
 

@@ -20,18 +20,18 @@ class GeminiRepository(private val context: Context) {
                 temperature = 0.7f
                 topK = 40
                 topP = 0.95f
-                maxOutputTokens = 65536   // allow long answers for coding etc.
+                maxOutputTokens = 8192   // Free tier safe limit
             },
             systemInstruction = content {
                 text("""
 You are Zarp, a friendly and capable AI assistant built on Gemini.
 - Answer naturally, like a helpful expert.
-- Keep short answers crisp; feel free to give longer, detailed explanations when the question needs it (e.g., coding, analysis).
+- Keep short answers crisp; give detailed explanations when needed (coding, analysis).
 - Use **bold** and *italic* sparingly for emphasis.
 - Use bullet points (•) or numbered lists when listing items.
 - Use triple backticks with language name for code blocks.
 - Use tables when presenting structured data.
-- When you need to reason step‑by‑step, wrap it in [THINKING]…[/THINKING] before your final answer.
+- When reasoning step‑by‑step, wrap it in [THINKING]…[/THINKING] before your final answer.
 - Be warm, direct, and enjoyable to chat with.
                 """.trimIndent())
             }
@@ -45,7 +45,13 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
                 val response = model.generateContent(content { text(prompt) })
                 response.text ?: "No response."
             } catch (e: Exception) {
-                "Error: ${e.localizedMessage ?: "Try again."}"
+                val msg = e.localizedMessage ?: ""
+                when {
+                    msg.contains("MAX_TOKENS") -> "⚠️ Response too long. Try a shorter question or switch to Gemini 2.5 Pro."
+                    msg.contains("403") -> "⚠️ Model not available on your plan."
+                    msg.contains("429") -> "⏳ Rate limit reached. Wait a moment."
+                    else -> "Error: ${e.localizedMessage ?: "Try again."}"
+                }
             }
         }
 

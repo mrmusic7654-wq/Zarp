@@ -76,7 +76,9 @@ fun ChatScreen(
         AttachmentSheet(
             onDismiss = { viewModel.dismissAttachmentSheet() },
             onImageSelected = { uri -> viewModel.onImageSelected(uri) },
-            onFileSelected = { uri, name -> viewModel.onFileSelected(uri, name) }
+            onImagesSelected = { uris -> viewModel.onImagesSelected(uris) },
+            onFileSelected = { uri, name -> viewModel.onFileSelected(uri, name) },
+            onFilesSelected = { uris -> viewModel.onFilesSelected(uris) }
         )
     }
 

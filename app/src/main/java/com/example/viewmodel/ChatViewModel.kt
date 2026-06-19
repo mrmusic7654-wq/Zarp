@@ -2,10 +2,10 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.GeminiRepository
+import com.example.data.UsageTracker
 import com.example.model.Conversation
 import com.example.model.Message
 import kotlinx.coroutines.delay
@@ -23,7 +23,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val isListening: Boolean = false,
         val isAiThinking: Boolean = false,
         val currentConversationId: String? = null,
-        val conversations: List<Conversation> = emptyList(),   // memory only
+        val conversations: List<Conversation> = emptyList(),
         val isDrawerOpen: Boolean = false,
         val showAttachmentSheet: Boolean = false,
         val selectedImageUri: Uri? = null,
@@ -58,7 +58,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    // in‑memory storage of all conversations
+    // in‑memory storage of all conversations (not persisted)
     private val allConversations = mutableListOf<Conversation>()
 
     fun onInputChanged(text: String) {
@@ -78,7 +78,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             timestamp = System.currentTimeMillis()
         )
 
-        // update UI with user message
         _uiState.value = _uiState.value.copy(
             messages = _uiState.value.messages + userMessage,
             inputText = "",
@@ -95,6 +94,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     geminiRepository.generateResponse(currentText, modelName)
                 }
+
+                // Record today's usage for the selected model
+                UsageTracker.recordRequest(application, _uiState.value.selectedModel)
+
                 val aiMessage = Message(
                     id = UUID.randomUUID().toString(),
                     text = responseText,
@@ -106,7 +109,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     isAiThinking = false
                 )
 
-                // store conversation in memory
+                // Save the current conversation in memory
                 saveCurrentConversation()
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isAiThinking = false)

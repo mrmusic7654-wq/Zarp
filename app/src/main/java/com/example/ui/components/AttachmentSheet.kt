@@ -46,13 +46,13 @@ fun AttachmentSheet(
     onDismiss: () -> Unit,
     onImageSelected: (Uri) -> Unit,
     onImagesSelected: (List<Uri>) -> Unit = {},
-    onFileSelected: (Uri, String) -> Unit = {},
+    onFileSelected: (Uri, String) -> Unit = { _, _ -> },
     onFilesSelected: (List<Uri>) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
 
-    val cameraUri = remember {
+    val cameraUri: Uri = remember {
         val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }

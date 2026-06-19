@@ -1,8 +1,11 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
+import android.speech.RecognizerIntent
 import android.util.Log
+import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ChatRepository
@@ -30,6 +33,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val selectedImageUri: Uri? = null,
         val selectedFileName: String? = null,
         val selectedModel: String = "Gemini 2.5 Flash",
+        val customStyle: String = "",
+        val showStyleDialog: Boolean = false,
         val isDarkTheme: Boolean = true
     )
 
@@ -62,7 +67,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     init {
-        // Load conversation list from DB
         viewModelScope.launch {
             chatRepository.getAllConversations().collect { conversations ->
                 _uiState.value = _uiState.value.copy(conversations = conversations)
@@ -89,8 +93,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             timestamp = System.currentTimeMillis()
         )
 
+        // Update UI immediately with user message
+        val currentMessages = _uiState.value.messages + userMessage
         _uiState.value = _uiState.value.copy(
-            messages = _uiState.value.messages + userMessage,
+            messages = currentMessages,
             inputText = "",
             isAiThinking = true,
             selectedImageUri = null,
@@ -99,7 +105,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                // Create conversation in DB if new
+                // Save user message to DB
                 if (conversationId == null) {
                     val newConv = chatRepository.createNewConversation(displayText)
                     conversationId = newConv.id
@@ -108,18 +114,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     chatRepository.addMessageToConversation(conversationId, displayText, true)
                 }
 
-                // Call Gemini
+                // Build history (exclude the last user message since we send it separately)
+                val history = currentMessages.dropLast(1)
+
+                // Call Gemini with FULL conversation history
                 val modelName = getModelApiName(_uiState.value.selectedModel)
                 val responseText = if (imageUri != null) {
-                    geminiRepository.generateResponseWithImage(currentText, imageUri, modelName)
+                    geminiRepository.generateResponseWithImage(
+                        prompt = currentText,
+                        imageUri = imageUri,
+                        modelName = modelName,
+                        chatHistory = history,
+                        customStyle = _uiState.value.customStyle
+                    )
                 } else {
-                    geminiRepository.generateResponse(currentText, modelName)
+                    geminiRepository.generateResponse(
+                        prompt = currentText,
+                        modelName = modelName,
+                        chatHistory = history,
+                        customStyle = _uiState.value.customStyle
+                    )
                 }
 
                 // Record usage
                 UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)
 
-                // Save AI message to DB
+                // Save AI response to DB
                 chatRepository.addMessageToConversation(conversationId, responseText, false)
 
                 // Update UI
@@ -186,11 +206,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
             delay(2000)
-            _uiState.value = _uiState.value.copy(isListening = false, inputText = "What's the weather like today?")
+            _uiState.value = _uiState.value.copy(
+                isListening = false,
+                inputText = "What's the weather like today?"
+            )
         }
+    }
+
+    fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
+        }
+        try {
+            _uiState.value = _uiState.value.copy(isListening = true)
+            launcher.launch(intent)
+        } catch (e: Exception) {
+            onMicTap()
+        }
+    }
+
+    fun onVoiceResult(text: String) {
+        _uiState.value = _uiState.value.copy(
+            inputText = text,
+            isListening = false
+        )
     }
 
     fun onToggleDrawer(isOpen: Boolean) { _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen) }
     fun onModelSelected(model: String) { _uiState.value = _uiState.value.copy(selectedModel = model) }
+
+    fun onCustomStyleChanged(style: String) {
+        _uiState.value = _uiState.value.copy(customStyle = style)
+    }
+
+    fun onShowStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = true) }
+    fun onDismissStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = false) }
+
     fun onToggleTheme() { _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme) }
 }

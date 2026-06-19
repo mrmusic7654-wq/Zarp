@@ -14,6 +14,7 @@ import com.example.data.UsageTracker
 import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
 import com.example.model.Message
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -66,6 +67,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // Track current generation job for stop button
+    private var currentGenerationJob: Job? = null
+
     init {
         viewModelScope.launch {
             chatRepository.getAllConversations().collect { conversations ->
@@ -74,10 +78,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ──────────────────────────────────────────────
+    // Input
+    // ──────────────────────────────────────────────
     fun onInputChanged(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
+    // ──────────────────────────────────────────────
+    // Send message
+    // ──────────────────────────────────────────────
     fun onSend() {
         val currentText = _uiState.value.inputText
         val imageUri = _uiState.value.selectedImageUri
@@ -93,7 +103,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             timestamp = System.currentTimeMillis()
         )
 
-        // Update UI immediately with user message
         val currentMessages = _uiState.value.messages + userMessage
         _uiState.value = _uiState.value.copy(
             messages = currentMessages,
@@ -103,7 +112,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             selectedFileName = null
         )
 
-        viewModelScope.launch {
+        currentGenerationJob = viewModelScope.launch {
             try {
                 // Save user message to DB
                 if (conversationId == null) {
@@ -114,10 +123,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     chatRepository.addMessageToConversation(conversationId, displayText, true)
                 }
 
-                // Build history (exclude the last user message since we send it separately)
+                // Build history (exclude the last user message)
                 val history = currentMessages.dropLast(1)
 
-                // Call Gemini with FULL conversation history
+                // Call Gemini with full conversation context
                 val modelName = getModelApiName(_uiState.value.selectedModel)
                 val responseText = if (imageUri != null) {
                     geminiRepository.generateResponseWithImage(
@@ -153,26 +162,64 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     messages = _uiState.value.messages + aiMessage,
                     isAiThinking = false
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Job was cancelled by stop button — add partial message
+                _uiState.value = _uiState.value.copy(
+                    isAiThinking = false,
+                    messages = _uiState.value.messages + Message(
+                        id = UUID.randomUUID().toString(),
+                        text = "⏹️ Generation stopped.",
+                        isUser = false,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
+                throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "onSend failed", e)
                 _uiState.value = _uiState.value.copy(isAiThinking = false)
+                _uiState.value = _uiState.value.copy(
+                    messages = _uiState.value.messages + Message(
+                        id = UUID.randomUUID().toString(),
+                        text = "❌ Error: ${e.localizedMessage ?: "Something went wrong"}",
+                        isUser = false,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
             }
         }
     }
 
+    // ──────────────────────────────────────────────
+    // Stop generation
+    // ──────────────────────────────────────────────
+    fun onStopGeneration() {
+        currentGenerationJob?.cancel()
+        currentGenerationJob = null
+    }
+
+    // ──────────────────────────────────────────────
+    // Conversation management
+    // ──────────────────────────────────────────────
     fun onNewChat() {
+        currentGenerationJob?.cancel()
         _uiState.value = _uiState.value.copy(
             messages = emptyList(),
             currentConversationId = null,
             isDrawerOpen = false,
             inputText = "",
             selectedImageUri = null,
-            selectedFileName = null
+            selectedFileName = null,
+            isAiThinking = false
         )
     }
 
     fun onSelectConversation(id: String) {
-        _uiState.value = _uiState.value.copy(currentConversationId = id, isDrawerOpen = false)
+        currentGenerationJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            currentConversationId = id,
+            isDrawerOpen = false,
+            isAiThinking = false
+        )
         viewModelScope.launch {
             chatRepository.getMessagesForConversation(id).first().let { messages ->
                 _uiState.value = _uiState.value.copy(messages = messages)
@@ -187,8 +234,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onAttachmentTap() { _uiState.value = _uiState.value.copy(showAttachmentSheet = true) }
-    fun dismissAttachmentSheet() { _uiState.value = _uiState.value.copy(showAttachmentSheet = false) }
+    // ──────────────────────────────────────────────
+    // Attachments
+    // ──────────────────────────────────────────────
+    fun onAttachmentTap() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = true)
+    }
+
+    fun dismissAttachmentSheet() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
+    }
 
     fun onImageSelected(uri: Uri) {
         _uiState.value = _uiState.value.copy(selectedImageUri = uri, selectedFileName = null)
@@ -202,6 +257,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(selectedImageUri = null, selectedFileName = null)
     }
 
+    // ──────────────────────────────────────────────
+    // Voice input
+    // ──────────────────────────────────────────────
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
@@ -233,15 +291,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun onToggleDrawer(isOpen: Boolean) { _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen) }
-    fun onModelSelected(model: String) { _uiState.value = _uiState.value.copy(selectedModel = model) }
+    // ──────────────────────────────────────────────
+    // UI toggles
+    // ──────────────────────────────────────────────
+    fun onToggleDrawer(isOpen: Boolean) {
+        _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen)
+    }
+
+    fun onModelSelected(model: String) {
+        _uiState.value = _uiState.value.copy(selectedModel = model)
+    }
 
     fun onCustomStyleChanged(style: String) {
         _uiState.value = _uiState.value.copy(customStyle = style)
     }
 
-    fun onShowStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = true) }
-    fun onDismissStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = false) }
+    fun onShowStyleDialog() {
+        _uiState.value = _uiState.value.copy(showStyleDialog = true)
+    }
 
-    fun onToggleTheme() { _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme) }
+    fun onDismissStyleDialog() {
+        _uiState.value = _uiState.value.copy(showStyleDialog = false)
+    }
+
+    fun onToggleTheme() {
+        _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme)
+    }
 }

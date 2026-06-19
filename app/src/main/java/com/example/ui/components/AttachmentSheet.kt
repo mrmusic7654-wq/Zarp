@@ -45,18 +45,19 @@ import java.io.File
 fun AttachmentSheet(
     onDismiss: () -> Unit,
     onImageSelected: (Uri) -> Unit,
-    onFileSelected: (Uri, String) -> Unit
+    onImagesSelected: (List<Uri>) -> Unit = {},
+    onFileSelected: (Uri, String) -> Unit = {},
+    onFilesSelected: (List<Uri>) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
 
-    // Camera URI (stable reference)
     val cameraUri = remember {
         val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
-    // CAMERA launcher — dismiss AFTER success
+    // Camera — single shot
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -69,38 +70,26 @@ fun AttachmentSheet(
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            cameraLauncher.launch(cameraUri)
-        } else {
-            Toast.makeText(context, "Camera permission denied", Toast.LENGTH_SHORT).show()
-        }
+        if (granted) cameraLauncher.launch(cameraUri)
+        else Toast.makeText(context, "Camera permission denied", Toast.LENGTH_SHORT).show()
     }
 
-    // GALLERY launcher — dismiss AFTER result
+    // Gallery — MULTIPLE images at once
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            onImageSelected(uri)
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onImagesSelected(uris)
             onDismiss()
         }
     }
 
-    // FILE picker — dismiss AFTER result
+    // File picker — MULTIPLE files at once
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            val name = try {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        cursor.getString(cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME))
-                    } else "File"
-                } ?: "File"
-            } catch (e: Exception) {
-                "File"
-            }
-            onFileSelected(uri, name)
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onFilesSelected(uris)
             onDismiss()
         }
     }
@@ -115,7 +104,6 @@ fun AttachmentSheet(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp)
         ) {
-            // Camera
             AttachmentOption(
                 icon = Icons.Outlined.CameraAlt,
                 text = "Camera",
@@ -123,37 +111,25 @@ fun AttachmentSheet(
                     val hasPermission = ContextCompat.checkSelfPermission(
                         context, Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED
-                    if (hasPermission) {
-                        cameraLauncher.launch(cameraUri)
-                    } else {
-                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                    }
-                    // DO NOT dismiss here — wait for result callback
+                    if (hasPermission) cameraLauncher.launch(cameraUri)
+                    else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                 }
             )
-
-            // Gallery
             AttachmentOption(
                 icon = Icons.Outlined.PhotoLibrary,
                 text = "Photo & Video Library",
                 onClick = {
                     galleryLauncher.launch("image/*")
-                    // DO NOT dismiss here
                 }
             )
-
-            // File
             AttachmentOption(
                 icon = Icons.AutoMirrored.Outlined.InsertDriveFile,
                 text = "File",
                 onClick = {
                     filePickerLauncher.launch(arrayOf("*/*"))
-                    // DO NOT dismiss here
                 }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
-
             AttachmentOption(
                 icon = Icons.Rounded.Folder,
                 text = "Connect to Google Drive",

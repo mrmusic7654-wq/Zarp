@@ -11,9 +11,7 @@ import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
 import com.example.model.Message
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -89,7 +87,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else -> return
         }
 
+        // Optimistic UI update
+        val userMessage = Message(
+            id = UUID.randomUUID().toString(),
+            text = displayText,
+            isUser = true,
+            timestamp = System.currentTimeMillis()
+        )
+        val currentMessages = _uiState.value.messages + userMessage
         _uiState.value = _uiState.value.copy(
+            messages = currentMessages,
             inputText = "",
             isAiThinking = true,
             selectedImageUri = null,
@@ -97,35 +104,54 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         viewModelScope.launch {
-            // Create conversation if new
-            if (conversationId == null) {
-                val newConv = chatRepository.createNewConversation(displayText)
-                conversationId = newConv.id
-                _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
-            } else {
-                chatRepository.addMessageToConversation(conversationId, displayText, true)
+            try {
+                // Create conversation if new
+                if (conversationId == null) {
+                    val newConv = chatRepository.createNewConversation(displayText)
+                    conversationId = newConv.id
+                    _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
+                } else {
+                    chatRepository.addMessageToConversation(conversationId, displayText, true)
+                }
+
+                val modelName = getModelApiName(_uiState.value.selectedModel)
+                Log.d("ChatViewModel", "Calling Gemini with model: $modelName")
+
+                // Call Gemini API
+                val responseText = if (imageUri != null) {
+                    geminiRepository.generateResponseWithImage(currentText, imageUri, modelName)
+                } else {
+                    geminiRepository.generateResponse(currentText, modelName)
+                }
+
+                Log.d("ChatViewModel", "Got response: ${responseText.take(50)}...")
+
+                // Save AI message to DB
+                chatRepository.addMessageToConversation(conversationId, responseText, false)
+
+                // Update UI directly (not via Flow)
+                val aiMessage = Message(
+                    id = UUID.randomUUID().toString(),
+                    text = responseText,
+                    isUser = false,
+                    timestamp = System.currentTimeMillis()
+                )
+                _uiState.value = _uiState.value.copy(
+                    messages = _uiState.value.messages + aiMessage,
+                    isAiThinking = false
+                )
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Error in onSend", e)
+                _uiState.value = _uiState.value.copy(
+                    isAiThinking = false,
+                    messages = _uiState.value.messages + Message(
+                        id = UUID.randomUUID().toString(),
+                        text = "❌ Error: ${e.localizedMessage ?: "Something went wrong"}",
+                        isUser = false,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
             }
-
-            // Refresh messages
-            refreshMessages(conversationId)
-
-            val modelName = getModelApiName(_uiState.value.selectedModel)
-            val responseText = if (imageUri != null) {
-                geminiRepository.generateResponseWithImage(currentText, imageUri, modelName)
-            } else {
-                geminiRepository.generateResponse(currentText, modelName)
-            }
-
-            chatRepository.addMessageToConversation(conversationId, responseText, false)
-            refreshMessages(conversationId)
-            
-            _uiState.value = _uiState.value.copy(isAiThinking = false)
-        }
-    }
-
-    private suspend fun refreshMessages(conversationId: String) {
-        chatRepository.getMessagesForConversation(conversationId).collect { messages ->
-            _uiState.value = _uiState.value.copy(messages = messages)
         }
     }
 
@@ -172,21 +198,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSelectConversation(id: String) {
-        _uiState.value = _uiState.value.copy(
-            currentConversationId = id,
-            isDrawerOpen = false
-        )
+        _uiState.value = _uiState.value.copy(currentConversationId = id, isDrawerOpen = false)
         viewModelScope.launch {
-            refreshMessages(id)
+            chatRepository.getMessagesForConversation(id).collect { messages ->
+                _uiState.value = _uiState.value.copy(messages = messages)
+            }
         }
     }
 
     fun onDeleteConversation(id: String) {
         viewModelScope.launch {
             chatRepository.deleteConversation(id)
-            if (_uiState.value.currentConversationId == id) {
-                onNewChat()
-            }
+            if (_uiState.value.currentConversationId == id) onNewChat()
         }
     }
 

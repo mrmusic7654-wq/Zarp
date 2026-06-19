@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
-import com.example.util.MarkdownFormatter
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +21,7 @@ class GeminiRepository(private val context: Context) {
                 temperature = 0.7f
                 topK = 40
                 topP = 0.95f
-                maxOutputTokens = 1024          // short = fast
+                maxOutputTokens = 1024
             }
         )
     }
@@ -33,7 +32,7 @@ class GeminiRepository(private val context: Context) {
                 ?: return@withContext "⚠️ API key not set."
             try {
                 val response = model.generateContent(content { text(prompt) })
-                MarkdownFormatter.clean(response.text ?: "No response.")
+                response.text?.trim() ?: "No response."
             } catch (e: Exception) {
                 "Error: ${e.localizedMessage ?: "Try again."}"
             }
@@ -52,7 +51,7 @@ class GeminiRepository(private val context: Context) {
                 image(bitmap)
                 text(prompt.ifBlank { "Describe this image." })
             })
-            MarkdownFormatter.clean(response.text ?: "No analysis.")
+            response.text?.trim() ?: "No analysis."
         } catch (e: Exception) {
             "Image error: ${e.localizedMessage ?: "Try again."}"
         }

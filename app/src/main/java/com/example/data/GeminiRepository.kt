@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
@@ -29,10 +28,10 @@ class GeminiRepository(private val context: Context) {
     suspend fun generateResponse(prompt: String, modelName: String): String =
         withContext(Dispatchers.IO) {
             val model = getModel(modelName)
-                ?: return@withContext "⚠️ API key not set."
+                ?: return@withContext "⚠️ API key not set. Go to Settings → API Key."
             try {
                 val response = model.generateContent(content { text(prompt) })
-                response.text?.trim() ?: "No response."
+                response.text ?: "No response."
             } catch (e: Exception) {
                 "Error: ${e.localizedMessage ?: "Try again."}"
             }
@@ -44,14 +43,14 @@ class GeminiRepository(private val context: Context) {
         val model = getModel(modelName)
             ?: return@withContext "⚠️ API key not set."
         try {
-            val bitmap = context.contentResolver.openInputStream(imageUri)?.use {
+            val bitmap: Bitmap = context.contentResolver.openInputStream(imageUri)?.use {
                 BitmapFactory.decodeStream(it)
             } ?: return@withContext "Couldn't read image."
             val response = model.generateContent(content {
                 image(bitmap)
                 text(prompt.ifBlank { "Describe this image." })
             })
-            response.text?.trim() ?: "No analysis."
+            response.text ?: "No analysis."
         } catch (e: Exception) {
             "Image error: ${e.localizedMessage ?: "Try again."}"
         }

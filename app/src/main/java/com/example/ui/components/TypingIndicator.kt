@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,7 +23,6 @@ import kotlin.math.sin
 
 @Composable
 fun TypingIndicator(modifier: Modifier = Modifier) {
-    // Timer
     var secondsElapsed by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -31,7 +31,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         }
     }
 
-    // Rotation animation
     val infiniteTransition = rememberInfiniteTransition(label = "petal_rotation")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -43,7 +42,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         label = "rotation"
     )
 
-    // Scale pulse
     val scale by infiniteTransition.animateFloat(
         initialValue = 0.85f,
         targetValue = 1.15f,
@@ -54,7 +52,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         label = "scale"
     )
 
-    // Petal colors
     val petalColors = listOf(
         ZarpAccent,
         ZarpAccent.copy(alpha = 0.8f),
@@ -70,7 +67,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Petal animation
         Canvas(
             modifier = Modifier
                 .size(80.dp)
@@ -98,7 +94,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
                 }
             }
 
-            // Center dot
             drawCircle(
                 color = Color.White,
                 radius = size.width * 0.08f,

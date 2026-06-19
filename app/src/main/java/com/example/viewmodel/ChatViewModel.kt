@@ -30,8 +30,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val conversations: List<Conversation> = emptyList(),
         val isDrawerOpen: Boolean = false,
         val showAttachmentSheet: Boolean = false,
-        val selectedImageUri: Uri? = null,
-        val selectedFileName: String? = null,
+        val selectedImageUris: List<Uri> = emptyList(),
+        val selectedFileNames: List<String> = emptyList(),
         val selectedModel: String = "Gemini 2.5 Flash",
         val customStyle: String = "",
         val showStyleDialog: Boolean = false,
@@ -68,7 +68,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentGenerationJob: Job? = null
     private var lastPrompt: String = ""
-    private var lastImageUri: Uri? = null
+    private var lastImageUris: List<Uri> = emptyList()
 
     init {
         viewModelScope.launch {
@@ -84,15 +84,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSend() {
         val currentText = _uiState.value.inputText.ifBlank { lastPrompt }
-        val imageUri = _uiState.value.selectedImageUri ?: lastImageUri
+        val imageUris = _uiState.value.selectedImageUris.ifEmpty { lastImageUris }
         var conversationId = _uiState.value.currentConversationId
 
-        if (currentText.isBlank() && imageUri == null) return
+        if (currentText.isBlank() && imageUris.isEmpty()) return
 
         lastPrompt = currentText
-        lastImageUri = imageUri
+        lastImageUris = imageUris
 
-        val displayText = currentText.ifBlank { "📷 Image" }
+        val displayText = when {
+            currentText.isNotBlank() && imageUris.isNotEmpty() -> "$currentText\n📷 ${imageUris.size} image(s) attached"
+            currentText.isNotBlank() -> currentText
+            imageUris.isNotEmpty() -> "📷 ${imageUris.size} image(s) attached"
+            else -> return
+        }
+
         val userMessage = Message(
             id = UUID.randomUUID().toString(),
             text = displayText,
@@ -106,8 +112,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             inputText = "",
             isAiThinking = true,
             isPaused = false,
-            selectedImageUri = null,
-            selectedFileName = null
+            selectedImageUris = emptyList(),
+            selectedFileNames = emptyList()
         )
 
         currentGenerationJob = viewModelScope.launch {
@@ -123,9 +129,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val history = currentMessages.dropLast(1)
                 val modelName = getModelApiName(_uiState.value.selectedModel)
 
-                val responseText = if (imageUri != null) {
+                val responseText = if (imageUris.isNotEmpty()) {
+                    val firstImage = imageUris.first()
+                    val remainingImages = imageUris.drop(1)
                     geminiRepository.generateResponseWithImage(
-                        currentText, imageUri, modelName, history, _uiState.value.customStyle
+                        currentText, firstImage, modelName, history, _uiState.value.customStyle
                     )
                 } else {
                     geminiRepository.generateResponse(
@@ -147,10 +155,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     isAiThinking = false
                 )
                 lastPrompt = ""
-                lastImageUri = null
+                lastImageUris = emptyList()
             } catch (e: CancellationException) {
                 if (!_uiState.value.isPaused) {
-                    // Fully stopped
                     _uiState.value = _uiState.value.copy(
                         isAiThinking = false,
                         messages = _uiState.value.messages + Message(
@@ -178,7 +185,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun onResumeGeneration() {
         if (_uiState.value.isPaused) {
             _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = true)
-            onSend()  // re‑sends the last prompt
+            onSend()
         }
     }
 
@@ -187,16 +194,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         currentGenerationJob = null
         _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = false)
         lastPrompt = ""
-        lastImageUri = null
+        lastImageUris = emptyList()
     }
 
-    // ── Voice auto‑send ──
     fun onVoiceResult(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text, isListening = false)
-        // Auto‑send after voice input
-        if (text.isNotBlank()) {
-            onSend()
-        }
+        if (text.isNotBlank()) onSend()
     }
 
     fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) {
@@ -212,26 +215,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── All other functions (unchanged from previous final version) ──
     fun onNewChat() {
         currentGenerationJob?.cancel()
+        currentGenerationJob = null
+        lastPrompt = ""
+        lastImageUris = emptyList()
         _uiState.value = _uiState.value.copy(
             messages = emptyList(),
             currentConversationId = null,
             isDrawerOpen = false,
             inputText = "",
-            selectedImageUri = null,
-            selectedFileName = null,
+            selectedImageUris = emptyList(),
+            selectedFileNames = emptyList(),
             isAiThinking = false,
             isPaused = false
         )
-        lastPrompt = ""
-        lastImageUri = null
     }
 
     fun onSelectConversation(id: String) {
         currentGenerationJob?.cancel()
-        _uiState.value = _uiState.value.copy(currentConversationId = id, isDrawerOpen = false, isAiThinking = false, isPaused = false)
+        currentGenerationJob = null
+        lastPrompt = ""
+        lastImageUris = emptyList()
+        _uiState.value = _uiState.value.copy(
+            currentConversationId = id,
+            isDrawerOpen = false,
+            isAiThinking = false,
+            isPaused = false,
+            messages = emptyList()
+        )
         viewModelScope.launch {
             chatRepository.getMessagesForConversation(id).first().let { msgs ->
                 _uiState.value = _uiState.value.copy(messages = msgs)
@@ -246,24 +258,88 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onAttachmentTap() { _uiState.value = _uiState.value.copy(showAttachmentSheet = true) }
-    fun dismissAttachmentSheet() { _uiState.value = _uiState.value.copy(showAttachmentSheet = false) }
-    fun onImageSelected(uri: Uri) { _uiState.value = _uiState.value.copy(selectedImageUri = uri, selectedFileName = null) }
-    fun onFileSelected(uri: Uri, name: String) { _uiState.value = _uiState.value.copy(selectedImageUri = uri, selectedFileName = name) }
-    fun clearImageSelection() { _uiState.value = _uiState.value.copy(selectedImageUri = null, selectedFileName = null) }
+    fun onAttachmentTap() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = true)
+    }
+
+    fun dismissAttachmentSheet() {
+        _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
+    }
+
+    fun onImageSelected(uri: Uri) {
+        val currentUris = _uiState.value.selectedImageUris.toMutableList()
+        val currentNames = _uiState.value.selectedFileNames.toMutableList()
+        currentUris.add(uri)
+        currentNames.add("Image ${currentUris.size}")
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = currentUris,
+            selectedFileNames = currentNames
+        )
+    }
+
+    fun onFileSelected(uri: Uri, name: String) {
+        val currentUris = _uiState.value.selectedImageUris.toMutableList()
+        val currentNames = _uiState.value.selectedFileNames.toMutableList()
+        currentUris.add(uri)
+        currentNames.add(name)
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = currentUris,
+            selectedFileNames = currentNames
+        )
+    }
+
+    fun removeSingleAttachment(index: Int) {
+        val currentUris = _uiState.value.selectedImageUris.toMutableList()
+        val currentNames = _uiState.value.selectedFileNames.toMutableList()
+        if (index in currentUris.indices) {
+            currentUris.removeAt(index)
+            currentNames.removeAt(index)
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = currentUris,
+            selectedFileNames = currentNames
+        )
+    }
+
+    fun clearImageSelection() {
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = emptyList(),
+            selectedFileNames = emptyList()
+        )
+    }
 
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
             delay(2000)
-            _uiState.value = _uiState.value.copy(isListening = false, inputText = "What's the weather today?")
+            _uiState.value = _uiState.value.copy(
+                isListening = false,
+                inputText = "What's the weather today?"
+            )
         }
     }
 
-    fun onToggleDrawer(isOpen: Boolean) { _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen) }
-    fun onModelSelected(model: String) { _uiState.value = _uiState.value.copy(selectedModel = model) }
-    fun onCustomStyleChanged(style: String) { _uiState.value = _uiState.value.copy(customStyle = style) }
-    fun onShowStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = true) }
-    fun onDismissStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = false) }
-    fun onToggleTheme() { _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme) }
+    fun onToggleDrawer(isOpen: Boolean) {
+        _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen)
+    }
+
+    fun onModelSelected(model: String) {
+        _uiState.value = _uiState.value.copy(selectedModel = model)
+    }
+
+    fun onCustomStyleChanged(style: String) {
+        _uiState.value = _uiState.value.copy(customStyle = style)
+    }
+
+    fun onShowStyleDialog() {
+        _uiState.value = _uiState.value.copy(showStyleDialog = true)
+    }
+
+    fun onDismissStyleDialog() {
+        _uiState.value = _uiState.value.copy(showStyleDialog = false)
+    }
+
+    fun onToggleTheme() {
+        _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme)
+    }
 }

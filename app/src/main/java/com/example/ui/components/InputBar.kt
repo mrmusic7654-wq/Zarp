@@ -44,9 +44,9 @@ fun InputBar(
     isPaused: Boolean = false,
     onPause: () -> Unit = {},
     onResume: () -> Unit = {},
-    attachedImageUri: Uri? = null,
-    attachedFileName: String? = null,
-    onRemoveAttachment: () -> Unit = {}
+    attachedImageUris: List<Uri> = emptyList(),
+    attachedFileNames: List<String> = emptyList(),
+    onRemoveAttachment: (Int) -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -54,37 +54,40 @@ fun InputBar(
             .imePadding()
             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)
     ) {
-        // ── Attachment preview chip ──
-        if (attachedImageUri != null) {
+        // ── Multiple attachment chips (compact) ──
+        if (attachedImageUris.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(ZarpInputBg, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                AsyncImage(
-                    model = attachedImageUri,
-                    contentDescription = "Attachment preview",
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = attachedFileName ?: "Image attached",
-                    color = ZarpTextPrimary,
-                    fontSize = 13.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = onRemoveAttachment, modifier = Modifier.size(24.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Remove",
-                        tint = ZarpTextTertiary,
-                        modifier = Modifier.size(16.dp)
-                    )
+                attachedImageUris.forEachIndexed { index, uri ->
+                    Box {
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = "Attachment ${index + 1}",
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(6.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        IconButton(
+                            onClick = { onRemoveAttachment(index) },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(14.dp)
+                                .offset(x = 4.dp, y = (-4).dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -96,7 +99,7 @@ fun InputBar(
                 .height(52.dp)
                 .background(
                     ZarpInputBg,
-                    if (attachedImageUri != null) RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
+                    if (attachedImageUris.isNotEmpty()) RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
                     else RoundedCornerShape(28.dp)
                 )
                 .border(1.dp, ZarpInputBorder, RoundedCornerShape(28.dp))
@@ -147,12 +150,12 @@ fun InputBar(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // ── Dynamic button: Send / Pause / Resume / Mic ──
+            // ── Dynamic button ──
             Crossfade(
                 targetState = when {
                     isThinking -> "pause"
                     isPaused -> "resume"
-                    inputText.isNotBlank() || attachedImageUri != null -> "send"
+                    inputText.isNotBlank() || attachedImageUris.isNotEmpty() -> "send"
                     else -> "mic"
                 },
                 animationSpec = tween(200),
@@ -170,7 +173,7 @@ fun InputBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Pause,
-                                contentDescription = "Pause generation",
+                                contentDescription = "Pause",
                                 tint = Color.White,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -187,7 +190,7 @@ fun InputBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Resume generation",
+                                contentDescription = "Resume",
                                 tint = ZarpMainBg,
                                 modifier = Modifier.size(20.dp)
                             )

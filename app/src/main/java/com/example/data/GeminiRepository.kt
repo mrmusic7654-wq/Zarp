@@ -13,8 +13,8 @@ import kotlinx.coroutines.withContext
 
 class GeminiRepository(private val context: Context) {
 
-    private val fullContextCount = 5   // keep last 5 messages in full
-    private val maxSummaryAge = 30     // summarise anything older than the last 30
+    private val fullContextCount = 5
+    private val maxSummaryAge = 30
 
     private fun getModel(modelName: String, customStyle: String = ""): GenerativeModel? {
         val key = KeyManager.getGeminiKey(context) ?: return null
@@ -50,31 +50,19 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
         )
     }
 
-    /**
-     * Build a compact context string:
-     * - Full text for the last [fullContextCount] messages.
-     * - A one‑paragraph summary of older messages.
-     */
     private fun buildContext(history: List<Message>): String {
         if (history.isEmpty()) return ""
-
         val sb = StringBuilder()
-
-        // ── recent messages (full text) ──
         val recent = history.takeLast(fullContextCount)
         for (msg in recent) {
             val role = if (msg.isUser) "User" else "Zarp"
             sb.appendLine("$role: ${msg.text}")
         }
-
-        // ── older messages (summarised) ──
         val older = history.dropLast(fullContextCount)
         if (older.isNotEmpty()) {
             sb.appendLine("\n--- Earlier conversation summary ---")
-            // Summarise user and assistant separately
             val userLines = older.filter { it.isUser }.map { it.text }
             val assistantLines = older.filter { !it.isUser }.map { it.text }
-
             if (userLines.isNotEmpty()) {
                 sb.append("User asked about: ")
                 sb.appendLine(userLines.joinToString("; ") { it.take(80) })
@@ -85,7 +73,6 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
             }
             sb.appendLine("--- End of summary ---\n")
         }
-
         return sb.toString().trim()
     }
 
@@ -98,23 +85,22 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
         val model = getModel(modelName, customStyle) ?: return@withContext "⚠️ API key not set."
         try {
             val contextBlock = buildContext(chatHistory)
-
             val response = model.generateContent(
                 content {
-                    if (contextBlock.isNotBlank()) {
-                        text(contextBlock)
-                    }
+                    if (contextBlock.isNotBlank()) text(contextBlock)
                     text(prompt)
                 }
             )
             response.text ?: "No response."
         } catch (e: Exception) {
+            Log.e("GeminiRepo", "Error for $modelName: ${e.localizedMessage}", e)
             val msg = e.localizedMessage ?: ""
             when {
-                msg.contains("MAX_TOKENS") -> "⚠️ Response too long. Try a shorter question."
-                msg.contains("403") -> "⚠️ Model not available on your plan."
-                msg.contains("429") -> "⏳ Rate limit reached. Wait a moment."
-                else -> "Error: ${e.localizedMessage ?: "Try again."}"
+                msg.contains("403") -> "⚠️ Model '$modelName' not available on your plan. Try Gemini 2.5 Flash."
+                msg.contains("404") -> "⚠️ Model '$modelName' not found."
+                msg.contains("429") -> "⏳ Rate limit reached."
+                msg.contains("503") || msg.contains("timeout", true) -> "⏰ Model busy. Try again."
+                else -> "❌ Error: ${e.localizedMessage ?: "Try Gemini 2.5 Flash"}"
             }
         }
     }
@@ -132,13 +118,12 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
                 BitmapFactory.decodeStream(it)
             } ?: return@withContext "Couldn't read image."
 
-            // Images use many tokens → keep only the last 3 messages + summary
             val shortHistory = chatHistory.takeLast(3)
             val older = chatHistory.dropLast(3)
             val summary = if (older.isNotEmpty()) {
-                val userQ = older.filter { it.isUser }.joinToString("; ") { it.text.take(60) }
-                val assistantA = older.filter { !it.isUser }.joinToString("; ") { it.text.take(60) }
-                "Earlier: user asked [$userQ], Zarp answered [$assistantA]."
+                val u = older.filter { it.isUser }.joinToString("; ") { it.text.take(60) }
+                val a = older.filter { !it.isUser }.joinToString("; ") { it.text.take(60) }
+                "Earlier: user [$u], Zarp [$a]."
             } else ""
 
             val response = model.generateContent(
@@ -154,7 +139,8 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
             )
             response.text ?: "No analysis."
         } catch (e: Exception) {
-            "Image error: ${e.localizedMessage ?: "Try again."}"
+            Log.e("GeminiRepo", "Image error: ${e.localizedMessage}", e)
+            "❌ Image error: ${e.localizedMessage ?: "Try again."}"
         }
     }
 }

@@ -13,11 +13,8 @@ object KeyManager {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-
         return EncryptedSharedPreferences.create(
-            context,                // <-- context first
-            PREF_NAME,
-            masterKey,
+            context, PREF_NAME, masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
@@ -29,9 +26,5 @@ object KeyManager {
 
     fun getApiKey(context: Context): String? {
         return getPrefs(context).getString(KEY_API_KEY, null)
-    }
-
-    fun clearApiKey(context: Context) {
-        getPrefs(context).edit().remove(KEY_API_KEY).apply()
     }
 }

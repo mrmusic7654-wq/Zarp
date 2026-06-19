@@ -55,14 +55,14 @@ fun ChatScreen(
     var showModelSelector by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Warn if API key missing
+    // Warn if API key is missing
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
             snackbarHostState.showSnackbar("API key missing. Set it in Settings → API Key.")
         }
     }
 
-    // Sync drawer state
+    // Sync drawer
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) drawerState.open()
         else if (!uiState.isDrawerOpen && drawerState.isOpen) drawerState.close()
@@ -126,8 +126,7 @@ fun ChatScreen(
 
                             DropdownMenu(
                                 expanded = showModelSelector,
-                                onDismissRequest = { showModelSelector = false },
-                                modifier = Modifier.background(ZarpBubbleBg)
+                                onDismissRequest = { showModelSelector = false }
                             ) {
                                 ChatViewModel.availableModels.forEach { model ->
                                     val used = UsageTracker.getCount(context, model)
@@ -137,25 +136,25 @@ fun ChatScreen(
 
                                     DropdownMenuItem(
                                         text = {
-                                            Column {
+                                            Column(modifier = Modifier.width(220.dp)) {
                                                 Text(
                                                     text = model,
-                                                    color = if (isSelected) ZarpAccent else ZarpTextPrimary,
                                                     fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Medium
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = if (isSelected) ZarpAccent else ZarpTextPrimary
                                                 )
                                                 Spacer(modifier = Modifier.height(2.dp))
                                                 Text(
                                                     text = "$used / $limit requests today",
-                                                    color = ZarpTextTertiary,
-                                                    fontSize = 11.sp
+                                                    fontSize = 11.sp,
+                                                    color = ZarpTextTertiary
                                                 )
-                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Spacer(modifier = Modifier.height(4.dp))
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(3.dp)
-                                                        .background(Color(0xFF333333), RoundedCornerShape(2.dp))
+                                                        .background(Color(0xFF444444), RoundedCornerShape(2.dp))
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
@@ -213,7 +212,7 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Image preview
+                // Image preview bar
                 val uri = uiState.selectedImageUri
                 if (uri != null) {
                     Row(
@@ -248,12 +247,14 @@ fun ChatScreen(
                     }
                 }
 
+                // Messages
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f)
                 )
 
+                // Input bar
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
@@ -265,6 +266,7 @@ fun ChatScreen(
             }
         }
 
+        // Attachment sheet
         if (uiState.showAttachmentSheet) {
             AttachmentSheet(
                 onDismiss = { viewModel.dismissAttachmentSheet() },

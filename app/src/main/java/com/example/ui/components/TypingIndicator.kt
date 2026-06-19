@@ -1,21 +1,21 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.ZarpAccent
 import com.example.ui.theme.ZarpTextTertiary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun TypingIndicator(modifier: Modifier = Modifier) {
@@ -28,7 +28,6 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         }
     }
 
-    // Three staggered alpha animations
     val alpha1 = remember { Animatable(0.3f) }
     val alpha2 = remember { Animatable(0.3f) }
     val alpha3 = remember { Animatable(0.3f) }
@@ -66,40 +65,18 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .alpha(alpha1.value)
-                    .scale(alpha1.value)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .scale(alpha1.value)
-                        .alpha(alpha1.value)
-                ) {
-                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawCircle(color = ZarpAccent)
-                    }
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .alpha(alpha2.value)
-                    .scale(alpha2.value)
-            ) {
-                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.size(10.dp).alpha(alpha1.value)) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
                     drawCircle(color = ZarpAccent)
                 }
             }
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .alpha(alpha3.value)
-                    .scale(alpha3.value)
-            ) {
-                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.size(10.dp).alpha(alpha2.value)) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(color = ZarpAccent)
+                }
+            }
+            Box(modifier = Modifier.size(10.dp).alpha(alpha3.value)) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
                     drawCircle(color = ZarpAccent)
                 }
             }

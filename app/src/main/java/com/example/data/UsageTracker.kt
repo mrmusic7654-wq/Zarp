@@ -8,7 +8,6 @@ object UsageTracker {
     private const val PREFS_NAME = "zarp_usage"
     private const val KEY_DATE = "usage_date"
 
-    /** Free‑tier daily request limits per model (requests per day). */
     val modelLimits = mapOf(
         "Gemini 2.5 Flash" to 1500,
         "Gemini 2.5 Flash-Lite" to 1500,
@@ -21,7 +20,6 @@ object UsageTracker {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    /** Reset all counters if the date has changed. */
     private fun checkDate(context: Context) {
         val today = LocalDate.now().toString()
         val last = prefs(context).getString(KEY_DATE, null)
@@ -30,7 +28,6 @@ object UsageTracker {
         }
     }
 
-    /** Call after every successful API request. */
     fun recordRequest(context: Context, modelName: String) {
         checkDate(context)
         val key = "req_${modelName}"
@@ -38,12 +35,10 @@ object UsageTracker {
         prefs(context).edit().putInt(key, current + 1).apply()
     }
 
-    /** Requests made today for the given model. */
     fun getCount(context: Context, modelName: String): Int {
         checkDate(context)
         return prefs(context).getInt("req_${modelName}", 0)
     }
 
-    /** Daily limit for the given model (default 1500 if unknown). */
     fun getLimit(modelName: String): Int = modelLimits[modelName] ?: 1500
 }

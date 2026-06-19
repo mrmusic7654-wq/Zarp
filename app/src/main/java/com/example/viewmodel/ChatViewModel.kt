@@ -92,10 +92,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastPrompt = currentText
         lastImageUris = imageUris
 
+        val imageCount = imageUris.size
         val displayText = when {
-            currentText.isNotBlank() && imageUris.isNotEmpty() -> "$currentText\n📷 ${imageUris.size} image(s) attached"
+            currentText.isNotBlank() && imageCount > 0 -> "$currentText\n📷 $imageCount image(s) attached"
             currentText.isNotBlank() -> currentText
-            imageUris.isNotEmpty() -> "📷 ${imageUris.size} image(s) attached"
+            imageCount > 0 -> "📷 $imageCount image(s) attached"
             else -> return
         }
 
@@ -130,10 +131,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val modelName = getModelApiName(_uiState.value.selectedModel)
 
                 val responseText = if (imageUris.isNotEmpty()) {
-                    val firstImage = imageUris.first()
-                    val remainingImages = imageUris.drop(1)
                     geminiRepository.generateResponseWithImage(
-                        currentText, firstImage, modelName, history, _uiState.value.customStyle
+                        currentText, imageUris.first(), modelName, history, _uiState.value.customStyle
                     )
                 } else {
                     geminiRepository.generateResponse(
@@ -245,8 +244,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             messages = emptyList()
         )
         viewModelScope.launch {
-            chatRepository.getMessagesForConversation(id).first().let { msgs ->
+            try {
+                val msgs = chatRepository.getMessagesForConversation(id).first()
                 _uiState.value = _uiState.value.copy(messages = msgs)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Failed to load conversation $id", e)
+                _uiState.value = _uiState.value.copy(messages = emptyList())
             }
         }
     }
@@ -277,11 +280,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun onImagesSelected(uris: List<Uri>) {
+        val currentUris = _uiState.value.selectedImageUris.toMutableList()
+        val currentNames = _uiState.value.selectedFileNames.toMutableList()
+        uris.forEachIndexed { i, uri ->
+            currentUris.add(uri)
+            currentNames.add("Image ${currentUris.size}")
+        }
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = currentUris,
+            selectedFileNames = currentNames
+        )
+    }
+
     fun onFileSelected(uri: Uri, name: String) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
         currentUris.add(uri)
         currentNames.add(name)
+        _uiState.value = _uiState.value.copy(
+            selectedImageUris = currentUris,
+            selectedFileNames = currentNames
+        )
+    }
+
+    fun onFilesSelected(uris: List<Uri>) {
+        val currentUris = _uiState.value.selectedImageUris.toMutableList()
+        val currentNames = _uiState.value.selectedFileNames.toMutableList()
+        uris.forEach { uri ->
+            currentUris.add(uri)
+            currentNames.add("File ${currentUris.size}")
+        }
         _uiState.value = _uiState.value.copy(
             selectedImageUris = currentUris,
             selectedFileNames = currentNames

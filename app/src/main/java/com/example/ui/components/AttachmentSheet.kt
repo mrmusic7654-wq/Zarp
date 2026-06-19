@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -13,8 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.ui.theme.ZarpSidebarBg
 import com.example.ui.theme.ZarpTextPrimary
@@ -46,27 +50,47 @@ fun AttachmentSheet(
     val sheetState = rememberModalBottomSheetState()
     val context = LocalContext.current
 
+    // Camera URI
     val cameraUri = remember {
         val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
-    
+
+    // Camera launcher with permission
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success) onImageSelected(cameraUri)
+        if (success) {
+            onImageSelected(cameraUri)
+        }
     }
 
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            try {
+                cameraLauncher.launch(cameraUri)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Camera error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Camera permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Gallery launcher
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let { onImageSelected(it) }
     }
 
+    // File picker
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        uri?.let { 
+        uri?.let {
             val name = try {
                 context.contentResolver.query(it, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -94,7 +118,19 @@ fun AttachmentSheet(
                 icon = Icons.Outlined.CameraAlt,
                 text = "Camera",
                 onClick = {
-                    cameraLauncher.launch(cameraUri)
+                    val hasPermission = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (hasPermission) {
+                        try {
+                            cameraLauncher.launch(cameraUri)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Camera unavailable: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                     onDismiss()
                 }
             )
@@ -102,7 +138,11 @@ fun AttachmentSheet(
                 icon = Icons.Outlined.PhotoLibrary,
                 text = "Photo & Video Library",
                 onClick = {
-                    galleryLauncher.launch("image/*")
+                    try {
+                        galleryLauncher.launch("image/*")
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Gallery error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                     onDismiss()
                 }
             )
@@ -110,7 +150,11 @@ fun AttachmentSheet(
                 icon = Icons.AutoMirrored.Outlined.InsertDriveFile,
                 text = "File",
                 onClick = {
-                    filePickerLauncher.launch(arrayOf("*/*"))
+                    try {
+                        filePickerLauncher.launch(arrayOf("*/*"))
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "File picker error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                     onDismiss()
                 }
             )
@@ -118,7 +162,10 @@ fun AttachmentSheet(
             AttachmentOption(
                 icon = Icons.Rounded.Folder,
                 text = "Connect to Google Drive",
-                onClick = onDismiss
+                onClick = {
+                    Toast.makeText(context, "Coming soon!", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }
             )
         }
     }

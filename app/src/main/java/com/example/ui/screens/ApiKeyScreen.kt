@@ -2,7 +2,9 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -10,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -19,22 +22,25 @@ import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ApiKeyScreen(onNavigateBack: () -> Unit) {
+fun ApiKeysScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    var key by remember { mutableStateOf(KeyManager.getApiKey(context) ?: "") }
-    var showSavedMessage by remember { mutableStateOf(false) }
+
+    var geminiKey by remember { mutableStateOf(KeyManager.getGeminiKey(context) ?: "") }
+    var githubKey by remember { mutableStateOf(KeyManager.getGithubKey(context) ?: "") }
+    var telegramKey by remember { mutableStateOf(KeyManager.getTelegramKey(context) ?: "") }
+    var openaiKey by remember { mutableStateOf(KeyManager.getOpenAIKey(context) ?: "") }
+    var huggingFaceKey by remember { mutableStateOf(KeyManager.getHuggingFaceKey(context) ?: "") }
+
+    // 10 custom slots
+    val customKeys = remember { mutableStateListOf<String>().apply { repeat(10) { add(KeyManager.getCustomKey(context, it) ?: "") } } }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("API Key", color = ZarpTextPrimary) },
+                title = { Text("API Keys", color = ZarpTextPrimary, fontSize = 20.sp) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = ZarpTextPrimary
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = ZarpTextPrimary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = ZarpMainBg)
@@ -46,19 +52,58 @@ fun ApiKeyScreen(onNavigateBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Top
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Text(
-                text = "Enter your Gemini API Key",
-                color = ZarpTextSecondary,
-                fontSize = 14.sp
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+            Text("All keys are stored encrypted on this device only.", color = ZarpTextTertiary, fontSize = 13.sp)
+
+            KeySection("🔮 Gemini API", "AI chat responses", geminiKey, "AIzaSy...", { geminiKey = it }, { KeyManager.saveGeminiKey(context, geminiKey.trim()) })
+            KeySection("🐙 GitHub Token", "Repo access, gists", githubKey, "ghp_...", { githubKey = it }, { KeyManager.saveGithubKey(context, githubKey.trim()) })
+            KeySection("✈️ Telegram Bot", "Bot token from @BotFather", telegramKey, "123456:ABC-DEF...", { telegramKey = it }, { KeyManager.saveTelegramKey(context, telegramKey.trim()) })
+            KeySection("🧠 OpenAI API", "GPT models", openaiKey, "sk-...", { openaiKey = it }, { KeyManager.saveOpenAIKey(context, openaiKey.trim()) })
+            KeySection("🤗 Hugging Face", "HF API token", huggingFaceKey, "hf_...", { huggingFaceKey = it }, { KeyManager.saveHuggingFaceKey(context, huggingFaceKey.trim()) })
+
+            HorizontalDivider(color = ZarpDivider)
+
+            Text("Custom API Slots", color = ZarpTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            for (i in 0 until 10) {
+                KeySection(
+                    title = "🔧 Custom Slot ${i + 1}",
+                    subtitle = "Any service",
+                    value = customKeys[i],
+                    placeholder = "Enter key...",
+                    onValueChange = { customKeys[i] = it },
+                    onSave = { KeyManager.saveCustomKey(context, i, customKeys[i].trim()) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun KeySection(
+    title: String,
+    subtitle: String,
+    value: String,
+    placeholder: String,
+    onValueChange: (String) -> Unit,
+    onSave: () -> Unit
+) {
+    val context = LocalContext.current
+    Column {
+        Text(title, color = ZarpTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(subtitle, color = ZarpTextTertiary, fontSize = 12.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                placeholder = { Text("Paste your API key here", color = ZarpTextTertiary) },
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = { Text(placeholder, color = ZarpTextTertiary, fontSize = 13.sp) },
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 singleLine = true,
@@ -69,26 +114,17 @@ fun ApiKeyScreen(onNavigateBack: () -> Unit) {
                     unfocusedBorderColor = ZarpInputBorder,
                     cursorColor = ZarpAccent
                 ),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.weight(1f)
             )
-            Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
-                    if (key.isBlank()) {
-                        Toast.makeText(context, "Key cannot be empty", Toast.LENGTH_SHORT).show()
-                    } else {
-                        KeyManager.saveApiKey(context, key.trim())
-                        showSavedMessage = true
-                    }
+                    if (value.isBlank()) Toast.makeText(context, "Key empty", Toast.LENGTH_SHORT).show()
+                    else { onSave(); Toast.makeText(context, "Saved!", Toast.LENGTH_SHORT).show() }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent),
-                modifier = Modifier.align(Alignment.End)
+                modifier = Modifier.height(50.dp)
             ) {
-                Text("Save Key", color = ZarpMainBg)
-            }
-            if (showSavedMessage) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Key saved securely!", color = ZarpAccent, fontSize = 14.sp)
+                Text("Save", color = ZarpMainBg)
             }
         }
     }

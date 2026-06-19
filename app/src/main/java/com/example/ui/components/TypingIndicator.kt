@@ -1,29 +1,26 @@
 package com.example.ui.components
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.ZarpAccent
 import com.example.ui.theme.ZarpTextTertiary
 import kotlinx.coroutines.delay
-import kotlin.math.cos
-import kotlin.math.sin
 
 @Composable
 fun TypingIndicator(modifier: Modifier = Modifier) {
     var secondsElapsed by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(1000)
@@ -31,35 +28,36 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "petal_rotation")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            tween(3000, easing = LinearEasing),
-            RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
+    // Three staggered alpha animations
+    val alpha1 = remember { Animatable(0.3f) }
+    val alpha2 = remember { Animatable(0.3f) }
+    val alpha3 = remember { Animatable(0.3f) }
 
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            tween(1200, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-
-    val petalColors = listOf(
-        ZarpAccent,
-        ZarpAccent.copy(alpha = 0.8f),
-        Color(0xFFA0D0FF),
-        Color(0xFF90C5FF),
-        Color(0xFF80B8FF),
-        ZarpAccent.copy(alpha = 0.9f)
-    )
+    LaunchedEffect(Unit) {
+        launch {
+            while (true) {
+                alpha1.animateTo(1f, tween(300))
+                alpha1.animateTo(0.3f, tween(300))
+                delay(1200)
+            }
+        }
+        launch {
+            delay(200)
+            while (true) {
+                alpha2.animateTo(1f, tween(300))
+                alpha2.animateTo(0.3f, tween(300))
+                delay(1200)
+            }
+        }
+        launch {
+            delay(400)
+            while (true) {
+                alpha3.animateTo(1f, tween(300))
+                alpha3.animateTo(0.3f, tween(300))
+                delay(1200)
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -67,53 +65,48 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(
-            modifier = Modifier
-                .size(80.dp)
-                .scale(scale)
-        ) {
-            val centerX = size.width / 2f
-            val centerY = size.height / 2f
-            val petalCount = 6
-            val petalWidth = size.width * 0.3f
-            val petalHeight = size.width * 0.45f
-            val distanceFromCenter = size.width * 0.25f
-
-            for (i in 0 until petalCount) {
-                val angleDeg = rotation + (i * 60f)
-                val angleRad = Math.toRadians(angleDeg.toDouble())
-                val petalCenterX = centerX + (distanceFromCenter * cos(angleRad)).toFloat()
-                val petalCenterY = centerY + (distanceFromCenter * sin(angleRad)).toFloat()
-
-                rotate(angleDeg, pivot = Offset(petalCenterX, petalCenterY)) {
-                    drawOval(
-                        color = petalColors[i],
-                        topLeft = Offset(petalCenterX - petalWidth / 2f, petalCenterY - petalHeight / 2f),
-                        size = Size(petalWidth, petalHeight)
-                    )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .alpha(alpha1.value)
+                    .scale(alpha1.value)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .scale(alpha1.value)
+                        .alpha(alpha1.value)
+                ) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(color = ZarpAccent)
+                    }
                 }
             }
-
-            drawCircle(
-                color = Color.White,
-                radius = size.width * 0.08f,
-                center = Offset(centerX, centerY)
-            )
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .alpha(alpha2.value)
+                    .scale(alpha2.value)
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(color = ZarpAccent)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .alpha(alpha3.value)
+                    .scale(alpha3.value)
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(color = ZarpAccent)
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            text = "Zarp is thinking...",
-            color = ZarpTextTertiary,
-            fontSize = 13.sp
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "${secondsElapsed}s",
-            color = ZarpAccent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
-        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("Zarp is thinking...", color = ZarpTextTertiary, fontSize = 13.sp)
+        Text("${secondsElapsed}s", color = ZarpAccent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }

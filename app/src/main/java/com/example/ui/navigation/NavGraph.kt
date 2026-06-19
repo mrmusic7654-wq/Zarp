@@ -6,7 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.ui.screens.ApiKeyScreen
+import com.example.ui.screens.ApiKeysScreen
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.SettingsScreen
 
@@ -28,11 +28,11 @@ fun AppNavGraph() {
         composable("settings") {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToApiKey = { navController.navigate("api_key") }
+                onNavigateToApiKeys = { navController.navigate("api_keys") }
             )
         }
-        composable("api_key") {
-            ApiKeyScreen(
+        composable("api_keys") {
+            ApiKeysScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

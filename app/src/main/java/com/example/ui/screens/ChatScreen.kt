@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.*
@@ -112,7 +113,7 @@ fun ChatScreen(
                         onValueChange = { styleText = it },
                         placeholder = {
                             Text(
-                                "e.g. Be brutally honest, roast me, no sugarcoating. Or: Act like a pirate, use pirate language.",
+                                "e.g. Be brutally honest, roast me, no sugarcoating.",
                                 color = ZarpTextTertiary,
                                 fontSize = 12.sp
                             )
@@ -245,19 +246,13 @@ fun ChatScreen(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(3.dp)
-                                                        .background(
-                                                            Color(0xFF444444),
-                                                            RoundedCornerShape(2.dp)
-                                                        )
+                                                        .background(Color(0xFF444444), RoundedCornerShape(2.dp))
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth(percentage / 100f)
                                                             .height(3.dp)
-                                                            .background(
-                                                                ZarpAccent,
-                                                                RoundedCornerShape(2.dp)
-                                                            )
+                                                            .background(ZarpAccent, RoundedCornerShape(2.dp))
                                                     )
                                                 }
                                             }
@@ -281,6 +276,17 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        // ── Stop button (visible only when thinking) ──
+                        if (uiState.isAiThinking) {
+                            IconButton(onClick = { viewModel.onStopGeneration() }) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "Stop generation",
+                                    tint = Color(0xFFFF5252),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
                         // ── Style button ──
                         IconButton(onClick = { viewModel.onShowStyleDialog() }) {
                             Icon(
@@ -300,7 +306,7 @@ fun ChatScreen(
                             )
                         }
                         // ── More options ──
-                        IconButton(onClick = { /* Options */ }) {
+                        IconButton(onClick = { }) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "Options",
@@ -328,17 +334,14 @@ fun ChatScreen(
                     modifier = Modifier.weight(1f)
                 )
 
-                // ── Input bar with attachment chip ──
+                // ── Input bar ──
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
                     onSend = { viewModel.onSend() },
                     onMicTap = { viewModel.onStartVoiceInput(voiceLauncher) },
                     onAttachmentTap = { viewModel.onAttachmentTap() },
-                    isListening = uiState.isListening,
-                    attachedImageUri = uiState.selectedImageUri,
-                    attachedFileName = uiState.selectedFileName,
-                    onRemoveAttachment = { viewModel.clearImageSelection() }
+                    isListening = uiState.isListening
                 )
             }
         }

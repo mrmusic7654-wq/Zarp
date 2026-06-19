@@ -27,8 +27,7 @@ class GeminiRepository(private val context: Context) {
 
     suspend fun generateResponse(prompt: String, modelName: String): String =
         withContext(Dispatchers.IO) {
-            val model = getModel(modelName)
-                ?: return@withContext "⚠️ API key not set. Go to Settings → API Key."
+            val model = getModel(modelName) ?: return@withContext "⚠️ API key not set."
             try {
                 val response = model.generateContent(content { text(prompt) })
                 response.text ?: "No response."
@@ -40,8 +39,7 @@ class GeminiRepository(private val context: Context) {
     suspend fun generateResponseWithImage(
         prompt: String, imageUri: Uri, modelName: String
     ): String = withContext(Dispatchers.IO) {
-        val model = getModel(modelName)
-            ?: return@withContext "⚠️ API key not set."
+        val model = getModel(modelName) ?: return@withContext "⚠️ API key not set."
         try {
             val bitmap: Bitmap = context.contentResolver.openInputStream(imageUri)?.use {
                 BitmapFactory.decodeStream(it)

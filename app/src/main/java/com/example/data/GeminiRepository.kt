@@ -28,23 +28,9 @@ class GeminiRepository(private val context: Context) {
                 temperature = 0.7f
                 topK = 40
                 topP = 0.95f
-                maxOutputTokens = 4096
-            },
-            systemInstruction = content {
-                text(
-                    """
-                    You are Zarp, a helpful AI assistant.
-                    - Give clear, direct answers with proper spacing
-                    - Use • for lists, 1. for steps
-                    - Use ```language for code blocks
-                    - Use | tables | for data |
-                    - Use [THINKING]...[/THINKING] for step-by-step reasoning
-                    - Use emojis naturally (✅ ❌ 💡 📊)
-                    - Be conversational and concise
-                    - Avoid excessive markdown formatting
-                    """.trimIndent()
-                )
+                maxOutputTokens = 2048   // faster, still enough for most answers
             }
+            // No system instruction for speed
         )
     }
 

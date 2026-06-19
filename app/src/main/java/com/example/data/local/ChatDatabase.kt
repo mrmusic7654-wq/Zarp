@@ -24,7 +24,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "zarp_chat_db"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(false)
                 .build()
                 INSTANCE = instance
                 instance

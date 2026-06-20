@@ -104,18 +104,30 @@ fun ChatScreen(
                         minLines = 3
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = { viewModel.onCustomStyleChanged(""); viewModel.onDismissStyleDialog() }) {
+                    TextButton(onClick = {
+                        viewModel.onCustomStyleChanged("")
+                        viewModel.onDismissStyleDialog()
+                    }) {
                         Text("🔄 Reset to default", color = ZarpTextTertiary)
                     }
                 }
             },
             confirmButton = {
-                Button(onClick = { viewModel.onCustomStyleChanged(styleText); viewModel.onDismissStyleDialog() },
-                    colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)) {
+                Button(
+                    onClick = {
+                        viewModel.onCustomStyleChanged(styleText)
+                        viewModel.onDismissStyleDialog()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)
+                ) {
                     Text("✅ Apply", color = Color.White)
                 }
             },
-            dismissButton = { TextButton(onClick = { viewModel.onDismissStyleDialog() }) { Text("Cancel", color = ZarpTextTertiary) } },
+            dismissButton = {
+                TextButton(onClick = { viewModel.onDismissStyleDialog() }) {
+                    Text("Cancel", color = ZarpTextTertiary)
+                }
+            },
             containerColor = ZarpSidebarBg
         )
     }
@@ -129,10 +141,19 @@ fun ChatScreen(
                 SidebarDrawer(
                     conversations = uiState.conversations,
                     currentConversationId = uiState.currentConversationId,
-                    onNewChat = { viewModel.onNewChat(); scope.launch { drawerState.close() } },
-                    onSelectConversation = { viewModel.onSelectConversation(it); scope.launch { drawerState.close() } },
+                    onNewChat = {
+                        viewModel.onNewChat()
+                        scope.launch { drawerState.close() }
+                    },
+                    onSelectConversation = {
+                        viewModel.onSelectConversation(it)
+                        scope.launch { drawerState.close() }
+                    },
                     onDeleteConversation = { viewModel.onDeleteConversation(it) },
-                    onSettingsTap = { scope.launch { drawerState.close() }; onNavigateToSettings() }
+                    onSettingsTap = {
+                        scope.launch { drawerState.close() }
+                        onNavigateToSettings()
+                    }
                 )
             }
         }
@@ -145,12 +166,27 @@ fun ChatScreen(
                         Box {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable { showModelSelector = true }.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier
+                                    .clickable { showModelSelector = true }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                Text(uiState.selectedModel, color = ZarpTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                Icon(Icons.Default.ExpandMore, "Select Model", tint = ZarpTextPrimary, modifier = Modifier.padding(start = 4.dp).size(20.dp))
+                                Text(
+                                    uiState.selectedModel,
+                                    color = ZarpTextPrimary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Icon(
+                                    Icons.Default.ExpandMore,
+                                    "Select Model",
+                                    tint = ZarpTextPrimary,
+                                    modifier = Modifier.padding(start = 4.dp).size(20.dp)
+                                )
                             }
-                            DropdownMenu(expanded = showModelSelector, onDismissRequest = { showModelSelector = false }) {
+                            DropdownMenu(
+                                expanded = showModelSelector,
+                                onDismissRequest = { showModelSelector = false }
+                            ) {
                                 ChatViewModel.availableModels.forEach { model ->
                                     val used = UsageTracker.getCount(context, model)
                                     val limit = UsageTracker.getLimit(model)
@@ -158,17 +194,38 @@ fun ChatScreen(
                                     DropdownMenuItem(
                                         text = {
                                             Column(modifier = Modifier.width(220.dp)) {
-                                                Text(model, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                                                    color = if (uiState.selectedModel == model) ZarpAccent else ZarpTextPrimary)
+                                                Text(
+                                                    model,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = if (uiState.selectedModel == model) ZarpAccent else ZarpTextPrimary
+                                                )
                                                 Spacer(modifier = Modifier.height(2.dp))
-                                                Text("$used / $limit requests today", fontSize = 11.sp, color = ZarpTextTertiary)
+                                                Text(
+                                                    "$used / $limit requests today",
+                                                    fontSize = 11.sp,
+                                                    color = ZarpTextTertiary
+                                                )
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Box(Modifier.fillMaxWidth().height(3.dp).background(Color(0xFF444444), RoundedCornerShape(2.dp))) {
-                                                    Box(Modifier.fillMaxWidth(percentage / 100f).height(3.dp).background(ZarpAccent, RoundedCornerShape(2.dp)))
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .height(3.dp)
+                                                        .background(Color(0xFF444444), RoundedCornerShape(2.dp))
+                                                ) {
+                                                    Box(
+                                                        Modifier
+                                                            .fillMaxWidth(percentage / 100f)
+                                                            .height(3.dp)
+                                                            .background(ZarpAccent, RoundedCornerShape(2.dp))
+                                                    )
                                                 }
                                             }
                                         },
-                                        onClick = { viewModel.onModelSelected(model); showModelSelector = false }
+                                        onClick = {
+                                            viewModel.onModelSelected(model)
+                                            showModelSelector = false
+                                        }
                                     )
                                 }
                             }
@@ -182,11 +239,21 @@ fun ChatScreen(
                     actions = {
                         if (uiState.isAiThinking || uiState.isPaused) {
                             IconButton(onClick = { viewModel.onStopGeneration() }) {
-                                Icon(Icons.Default.Stop, "Stop", tint = Color(0xFFFF5252), modifier = Modifier.size(22.dp))
+                                Icon(
+                                    Icons.Default.Stop,
+                                    "Stop",
+                                    tint = Color(0xFFFF5252),
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                         }
                         IconButton(onClick = { viewModel.onShowStyleDialog() }) {
-                            Icon(Icons.Default.Tune, "Style", tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.Tune,
+                                "Style",
+                                tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         IconButton(onClick = { viewModel.onNewChat() }) {
                             Icon(Icons.Outlined.Edit, "New chat", tint = ZarpTextPrimary)
@@ -195,16 +262,26 @@ fun ChatScreen(
                             Icon(Icons.Default.MoreVert, "Options", tint = ZarpTextPrimary)
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = ZarpMainBg, scrolledContainerColor = ZarpMainBg)
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = ZarpMainBg,
+                        scrolledContainerColor = ZarpMainBg
+                    )
                 )
             },
             containerColor = ZarpMainBg
         ) { paddingValues ->
-            Column(Modifier.fillMaxSize().padding(paddingValues)) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    speakingMessageId = uiState.speakingMessageId,
+                    onSpeakMessage = { id, text -> viewModel.onSpeakMessage(id, text) },
+                    onTranslateMessage = { id, text -> viewModel.onTranslateMessage(id, text) }
                 )
                 InputBar(
                     inputText = uiState.inputText,

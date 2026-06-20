@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 class GeminiRepository(private val context: Context) {
 
     private val fullContextCount = 5
-    private val maxSummaryAge = 30
+    private val embeddingManager = EmbeddingManager(context)
 
     private fun getModel(modelName: String, customStyle: String = ""): GenerativeModel? {
         val key = KeyManager.getGeminiKey(context) ?: return null
@@ -50,29 +50,48 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
         )
     }
 
-    private fun buildContext(history: List<Message>): String {
+    private suspend fun buildContext(history: List<Message>, currentPrompt: String): String {
         if (history.isEmpty()) return ""
+
+        // Search for relevant older messages using embeddings
+        val relevant = embeddingManager.searchSimilar(currentPrompt, topK = 3)
+        val relevantSet = relevant.toSet()
+
         val sb = StringBuilder()
+
+        // Always include last 5 messages
         val recent = history.takeLast(fullContextCount)
         for (msg in recent) {
             val role = if (msg.isUser) "User" else "Zarp"
             sb.appendLine("$role: ${msg.text}")
         }
-        val older = history.dropLast(fullContextCount)
-        if (older.isNotEmpty()) {
-            sb.appendLine("\n--- Earlier conversation summary ---")
-            val userLines = older.filter { it.isUser }.map { it.text }
-            val assistantLines = older.filter { !it.isUser }.map { it.text }
+
+        // Add embedding‑matched messages (skip if already in recent)
+        val olderRelevant = history.filter { it.text in relevantSet && it !in recent }
+        if (olderRelevant.isNotEmpty()) {
+            sb.appendLine("\n--- Related earlier messages ---")
+            for (msg in olderRelevant) {
+                val role = if (msg.isUser) "User" else "Zarp"
+                sb.appendLine("$role: ${msg.text}")
+            }
+            sb.appendLine("--- End related ---\n")
+        }
+
+        // Summarise the rest
+        val rest = history.filter { it !in recent && it !in olderRelevant }
+        if (rest.isNotEmpty()) {
+            val userLines = rest.filter { it.isUser }.map { it.text }
+            val assistantLines = rest.filter { !it.isUser }.map { it.text }
             if (userLines.isNotEmpty()) {
-                sb.append("User asked about: ")
-                sb.appendLine(userLines.joinToString("; ") { it.take(80) })
+                sb.append("User previously asked about: ")
+                sb.appendLine(userLines.joinToString("; ") { it.take(60) })
             }
             if (assistantLines.isNotEmpty()) {
-                sb.append("Zarp answered with: ")
-                sb.appendLine(assistantLines.joinToString("; ") { it.take(80) })
+                sb.append("Zarp previously answered: ")
+                sb.appendLine(assistantLines.joinToString("; ") { it.take(60) })
             }
-            sb.appendLine("--- End of summary ---\n")
         }
+
         return sb.toString().trim()
     }
 
@@ -84,7 +103,7 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
     ): String = withContext(Dispatchers.IO) {
         val model = getModel(modelName, customStyle) ?: return@withContext "⚠️ API key not set."
         try {
-            val contextBlock = buildContext(chatHistory)
+            val contextBlock = buildContext(chatHistory, prompt)
             val response = model.generateContent(
                 content {
                     if (contextBlock.isNotBlank()) text(contextBlock)
@@ -142,5 +161,31 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
             Log.e("GeminiRepo", "Image error: ${e.localizedMessage}", e)
             "❌ Image error: ${e.localizedMessage ?: "Try again."}"
         }
+    }
+
+    suspend fun translate(text: String, targetLang: String): String = withContext(Dispatchers.IO) {
+        val key = KeyManager.getGeminiKey(context) ?: return@withContext "⚠️ API key not set."
+        val model = GenerativeModel(
+            modelName = "models/gemini-3.5-flash",  // Good multilingual model
+            apiKey = key,
+            generationConfig = com.google.ai.client.generativeai.type.generationConfig {
+                temperature = 0.2f
+                maxOutputTokens = 2048
+            }
+        )
+        try {
+            val response = model.generateContent(
+                content {
+                    text("Translate the following text to $targetLang. Return only the translated text, nothing else.\n\n$text")
+                }
+            )
+            response.text ?: "Translation failed."
+        } catch (e: Exception) {
+            "❌ Translation error: ${e.localizedMessage ?: "Try again."}"
+        }
+    }
+
+    suspend fun storeMessageEmbedding(text: String) {
+        embeddingManager.embedAndStore(text)
     }
 }

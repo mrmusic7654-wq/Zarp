@@ -19,16 +19,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.Conversation
@@ -38,6 +41,9 @@ import com.example.ui.theme.ZarpSidebarBg
 import com.example.ui.theme.ZarpTextPrimary
 import com.example.ui.theme.ZarpTextSecondary
 import com.example.ui.theme.ZarpTextTertiary
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SidebarDrawer(
@@ -45,6 +51,7 @@ fun SidebarDrawer(
     currentConversationId: String?,
     onNewChat: () -> Unit,
     onSelectConversation: (String) -> Unit,
+    onDeleteConversation: ((String) -> Unit)? = null,
     onSettingsTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -96,45 +103,82 @@ fun SidebarDrawer(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Chat History Section
-        LazyColumn(
-            modifier = Modifier.weight(1f)
-        ) {
-            val grouped = conversations.groupBy { it.dateGroup }
-            grouped.forEach { (group, convs) ->
-                item {
-                    Text(
-                        text = group,
-                        color = ZarpTextTertiary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
-                items(convs, key = { it.id }) { conv ->
-                    val isSelected = conv.id == currentConversationId
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) ZarpBubbleBg else ZarpSidebarBg)
-                            .clickable { onSelectConversation(conv.id) }
-                            .padding(horizontal = 12.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChatBubbleOutline,
-                            contentDescription = null,
-                            tint = ZarpTextTertiary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
+        if (conversations.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No conversations yet",
+                    color = ZarpTextTertiary,
+                    fontSize = 13.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f)
+            ) {
+                val grouped = conversations.groupBy { it.dateGroup }
+                grouped.forEach { (group, convs) ->
+                    item {
                         Text(
-                            text = conv.title,
-                            color = ZarpTextPrimary,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f)
+                            text = group,
+                            color = ZarpTextTertiary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
+                    }
+                    items(convs, key = { it.id }) { conv ->
+                        val isSelected = conv.id == currentConversationId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) ZarpBubbleBg else ZarpSidebarBg)
+                                .clickable { onSelectConversation(conv.id) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = null,
+                                tint = if (isSelected) ZarpTextPrimary else ZarpTextTertiary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = conv.title,
+                                    color = if (isSelected) ZarpTextPrimary else ZarpTextSecondary,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = formatTimestamp(conv.messages.lastOrNull()?.timestamp ?: 0L),
+                                    color = ZarpTextTertiary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            if (onDeleteConversation != null) {
+                                IconButton(
+                                    onClick = { onDeleteConversation(conv.id) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete conversation",
+                                        tint = ZarpTextTertiary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -143,13 +187,13 @@ fun SidebarDrawer(
         // Bottom Section
         Column {
             HorizontalDivider(color = ZarpDivider, thickness = 1.dp)
-            
+
             SidebarActionItem(
                 icon = Icons.Outlined.Settings,
                 text = "Settings",
                 onClick = onSettingsTap
             )
-            
+
             SidebarActionItem(
                 icon = Icons.Outlined.Star,
                 text = "Zarp Pro",
@@ -170,7 +214,7 @@ fun SidebarDrawer(
                         .background(ZarpTextTertiary),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "U", color = ZarpTextPrimary, fontSize = 14.sp)
+                    Text(text = "U", color = ZarpSidebarBg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
@@ -179,6 +223,25 @@ fun SidebarDrawer(
                 }
             }
         }
+    }
+}
+
+private fun formatTimestamp(timestamp: Long): String {
+    if (timestamp == 0L) return ""
+    return try {
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp
+        when {
+            diff < 60_000 -> "Just now"
+            diff < 3600_000 -> "${diff / 60_000}m ago"
+            diff < 86_400_000 -> "${diff / 3600_000}h ago"
+            else -> {
+                val sdf = SimpleDateFormat("MMM d", Locale.getDefault())
+                sdf.format(Date(timestamp))
+            }
+        }
+    } catch (e: Exception) {
+        ""
     }
 }
 

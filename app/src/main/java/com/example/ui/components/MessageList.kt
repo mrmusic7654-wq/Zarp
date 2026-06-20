@@ -31,8 +31,7 @@ fun MessageList(
     isAiThinking: Boolean,
     modifier: Modifier = Modifier,
     speakingMessageId: String? = null,
-    onSpeakMessage: ((String, String) -> Unit)? = null,
-    onTranslateMessage: ((String, String) -> Unit)? = null
+    onSpeakMessage: ((String, String) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
 
@@ -52,7 +51,7 @@ fun MessageList(
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             if (isAiThinking) {
-                item { TypingIndicator() }
+                item(key = "typing") { TypingIndicator() }
             }
 
             items(messages.reversed(), key = { it.id }) { message ->
@@ -95,9 +94,18 @@ fun EmptyChatState(modifier: Modifier = Modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             EmptyChatIcon()
             Spacer(modifier = Modifier.height(24.dp))
-            Text("Zarp", color = ZarpTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+            Text(
+                "Zarp",
+                color = ZarpTextPrimary,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            Text("How can I help you today?", color = ZarpTextTertiary, fontSize = 14.sp)
+            Text(
+                "How can I help you today?",
+                color = ZarpTextTertiary,
+                fontSize = 14.sp
+            )
         }
     }
 }

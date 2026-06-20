@@ -19,12 +19,15 @@ abstract class ChatDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): ChatDatabase {
             return INSTANCE ?: synchronized(this) {
+                // Clear the old instance reference to force recreation
+                INSTANCE = null
+                
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     ChatDatabase::class.java,
                     "zarp_chat_db"
                 )
-                .fallbackToDestructiveMigration()  // recreate DB on version change
+                .fallbackToDestructiveMigration() // only triggers if version changes
                 .build()
                 INSTANCE = instance
                 instance

@@ -53,7 +53,7 @@ fun AiMessageContent(
     val clipboardManager = LocalClipboardManager.current
     var showActions by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(message.id) {
         delay(300)
         showActions = true
     }
@@ -91,7 +91,12 @@ fun AiMessageContent(
                     onClick = { clipboardManager.setText(AnnotatedString(message.text)) },
                     modifier = Modifier.size(32.dp)
                 ) {
-                    Icon(Icons.Outlined.ContentCopy, "Copy", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        "Copy",
+                        tint = ZarpTextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 // Speak
                 if (onSpeak != null) {
@@ -109,15 +114,30 @@ fun AiMessageContent(
                 }
                 // Like
                 IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.ThumbUp, "Good", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Outlined.ThumbUp,
+                        "Good response",
+                        tint = ZarpTextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 // Dislike
                 IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.ThumbDown, "Bad", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Outlined.ThumbDown,
+                        "Bad response",
+                        tint = ZarpTextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 // Regenerate
                 IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.Refresh, "Regenerate", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        "Regenerate",
+                        tint = ZarpTextTertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }
@@ -151,10 +171,21 @@ fun DeepThinkBlock(content: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("🧠", fontSize = 16.sp)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Deep Think", color = Color(0xFF9B9BFF), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "Deep Think",
+                    color = Color(0xFF9B9BFF),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(content, color = Color(0xFFC0C0E0), fontSize = 13.sp, lineHeight = 20.sp, fontFamily = FontFamily.Monospace)
+            Text(
+                content,
+                color = Color(0xFFC0C0E0),
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
@@ -163,51 +194,101 @@ fun DeepThinkBlock(content: String) {
 fun FormattedText(text: String) {
     val formattedText = buildAnnotatedString {
         var remaining = text.trim()
+
         while (remaining.isNotEmpty()) {
             when {
                 remaining.startsWith("`") -> {
                     val end = remaining.indexOf("`", 1)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0xFF2A2A40), color = Color(0xFFE0A0FF), fontSize = 13.sp)) {
+                        withStyle(SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = Color(0xFF2A2A40),
+                            color = Color(0xFFE0A0FF),
+                            fontSize = 13.sp
+                        )) {
                             append(remaining.substring(1, end))
                         }
                         remaining = remaining.substring(end + 1)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("**") -> {
                     val end = remaining.indexOf("**", 2)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = ZarpTextPrimary)) { append(remaining.substring(2, end)) }
+                        withStyle(SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            color = ZarpTextPrimary
+                        )) {
+                            append(remaining.substring(2, end))
+                        }
                         remaining = remaining.substring(end + 2)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("*") -> {
                     val end = remaining.indexOf("*", 1)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = ZarpTextPrimary)) { append(remaining.substring(1, end)) }
+                        withStyle(SpanStyle(
+                            fontStyle = FontStyle.Italic,
+                            color = ZarpTextPrimary
+                        )) {
+                            append(remaining.substring(1, end))
+                        }
                         remaining = remaining.substring(end + 1)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("|") -> {
                     val newline = remaining.indexOf("\n")
                     val line = if (newline != -1) remaining.substring(0, newline) else remaining
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color(0xFFC0C0FF))) { append(line) }
+                    withStyle(SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = Color(0xFFC0C0FF)
+                    )) {
+                        append(line)
+                    }
                     remaining = if (newline != -1) remaining.substring(newline) else ""
                 }
                 remaining.startsWith("• ") || remaining.startsWith("- ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) { append("  •  ") }
+                    withStyle(SpanStyle(
+                        fontWeight = FontWeight.Medium,
+                        color = AccentBlue
+                    )) {
+                        append("  •  ")
+                    }
                     remaining = remaining.substring(2)
                 }
                 remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") in 1..3 -> {
                     val dotIndex = remaining.indexOf(". ")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AccentBlue)) { append(remaining.substring(0, dotIndex + 2)) }
+                    withStyle(SpanStyle(
+                        fontWeight = FontWeight.Bold,
+                        color = AccentBlue
+                    )) {
+                        append(remaining.substring(0, dotIndex + 2))
+                    }
                     remaining = remaining.substring(dotIndex + 2)
                 }
-                else -> { append(remaining[0]); remaining = remaining.substring(1) }
+                else -> {
+                    append(remaining[0])
+                    remaining = remaining.substring(1)
+                }
             }
         }
     }
-    Text(formattedText, fontSize = 15.sp, lineHeight = 24.sp, color = ZarpTextPrimary)
+
+    Text(
+        text = formattedText,
+        fontSize = 15.sp,
+        lineHeight = 24.sp,
+        color = ZarpTextPrimary
+    )
 }
 
 @Composable
@@ -215,7 +296,10 @@ fun CodeBlock(code: String) {
     val clipboardManager = LocalClipboardManager.current
     val lines = code.split("\n")
     val lang = lines.firstOrNull()?.trim()?.takeIf { it.length < 20 } ?: "code"
-    val actualCode = if (lines.size > 1 && lines.first().trim().length < 20) lines.drop(1).joinToString("\n").trim() else code.trim()
+    val actualCode = if (lines.size > 1 && lines.first().trim().length < 20)
+        lines.drop(1).joinToString("\n").trim()
+    else
+        code.trim()
 
     Box(
         modifier = Modifier
@@ -227,21 +311,45 @@ fun CodeBlock(code: String) {
     ) {
         Column {
             Row(
-                modifier = Modifier.fillMaxWidth().background(CodeHeaderBg).padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(CodeHeaderBg)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("📄", fontSize = 12.sp)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(lang, color = ZarpTextSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
+                    Text(
+                        lang,
+                        color = ZarpTextSecondary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
-                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actualCode)) }, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Outlined.ContentCopy, "Copy code", tint = ZarpTextSecondary, modifier = Modifier.size(14.dp))
+                IconButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(actualCode)) },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.ContentCopy,
+                        "Copy code",
+                        tint = ZarpTextSecondary,
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
             SelectionContainer {
-                Text(actualCode, color = Color(0xFFD4D4FF), fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(12.dp))
+                Text(
+                    actualCode,
+                    color = Color(0xFFD4D4FF),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.padding(12.dp)
+                )
             }
         }
     }

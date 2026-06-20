@@ -1,6 +1,5 @@
 package com.example.viewmodel
 
-import com.example.data.LiveVoiceManager
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
@@ -11,7 +10,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ChatRepository
 import com.example.data.GeminiRepository
-import com.example.data.TTSManager
 import com.example.data.UsageTracker
 import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
@@ -44,7 +42,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val translateLanguage: String = "English",
         val isTranslating: Boolean = false,
         val translateResult: String? = null,
-        val showTranslateDialog: Boolean = false
+        val showTranslateDialog: Boolean = false,
+        val likedMessages: Set<String> = emptySet(),
+        val dislikedMessages: Set<String> = emptySet()
     )
 
     companion object {
@@ -77,7 +77,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val database = ChatDatabase.getInstance(application)
     private val chatRepository = ChatRepository(database)
     private val geminiRepository = GeminiRepository(application)
-    private val ttsManager = TTSManager(application)
+    private val androidTTS = AndroidTTSManager(application)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -228,14 +228,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastImageUris = emptyList()
     }
 
-    // ── Voice: cancel restores keyboard ──
+    // Voice
     fun onVoiceResult(text: String) {
         _uiState.value = _uiState.value.copy(inputText = text, isListening = false)
         if (text.isNotBlank()) onSend()
     }
 
     fun onCancelVoice() {
-        _uiState.value = _uiState.value.copy(isListening = false, inputText = "")
+        _uiState.value = _uiState.value.copy(isListening = false)
     }
 
     fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) {
@@ -252,26 +252,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── TTS ──
+    // Android TTS speak
     fun onSpeakMessage(messageId: String, text: String) {
         if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) {
             onStopSpeaking()
             return
         }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId)
-            ttsManager.speak(text) {
-                _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
-            }
+        _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId)
+        androidTTS.speak(text) {
+            _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
         }
     }
 
     fun onStopSpeaking() {
-        ttsManager.stop()
+        androidTTS.stop()
         _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
     }
 
-    // ── Translate ──
+    // Like / Dislike
+    fun onLikeMessage(messageId: String) {
+        val liked = _uiState.value.likedMessages.toMutableSet()
+        val disliked = _uiState.value.dislikedMessages.toMutableSet()
+        if (messageId in liked) {
+            liked.remove(messageId)
+        } else {
+            liked.add(messageId)
+            disliked.remove(messageId)
+        }
+        _uiState.value = _uiState.value.copy(likedMessages = liked, dislikedMessages = disliked)
+    }
+
+    fun onDislikeMessage(messageId: String) {
+        val liked = _uiState.value.likedMessages.toMutableSet()
+        val disliked = _uiState.value.dislikedMessages.toMutableSet()
+        if (messageId in disliked) {
+            disliked.remove(messageId)
+        } else {
+            disliked.add(messageId)
+            liked.remove(messageId)
+        }
+        _uiState.value = _uiState.value.copy(likedMessages = liked, dislikedMessages = disliked)
+    }
+
+    // Translate
     fun onTranslateMessage(messageId: String, text: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTranslating = true)
@@ -292,7 +315,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(translateLanguage = lang)
     }
 
-    // ── Chat history ──
+    // Chat history
     fun onNewChat() {
         currentGenerationJob?.cancel()
         currentGenerationJob = null
@@ -325,14 +348,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val msgs = chatRepository.getMessagesForConversationOnce(id)
-                Log.d("ChatViewModel", "Loading conversation $id: ${msgs.size} messages")
-                if (msgs.isNotEmpty()) {
-                    msgs.forEach { Log.d("ChatViewModel", "  ${if (it.isUser) "User" else "Zarp"}: ${it.text.take(40)}...") }
-                }
+                Log.d("ChatVM", "📂 Loaded ${msgs.size} messages for $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "Failed to load conversation $id", e)
-                _uiState.value = _uiState.value.copy(messages = emptyList())
+                Log.e("ChatVM", "Failed to load conversation $id", e)
             }
         }
     }
@@ -344,7 +363,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Attachments ──
+    // Attachments
     fun onAttachmentTap() { _uiState.value = _uiState.value.copy(showAttachmentSheet = true) }
     fun dismissAttachmentSheet() { _uiState.value = _uiState.value.copy(showAttachmentSheet = false) }
 
@@ -390,21 +409,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (index in currentUris.indices) { currentUris.removeAt(index); currentNames.removeAt(index) }
         _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
-    private val liveVoiceManager = LiveVoiceManager(application)
-
-fun onLiveSpeak(text: String) {
-    viewModelScope.launch {
-        _uiState.value = _uiState.value.copy(isSpeaking = true)
-        liveVoiceManager.speakResponse(text) {
-            _uiState.value = _uiState.value.copy(isSpeaking = false)
-        }
-    }
-}
-
-fun onStopLiveVoice() {
-    liveVoiceManager.stop()
-    _uiState.value = _uiState.value.copy(isSpeaking = false)
-}
 
     fun clearImageSelection() {
         _uiState.value = _uiState.value.copy(selectedImageUris = emptyList(), selectedFileNames = emptyList())

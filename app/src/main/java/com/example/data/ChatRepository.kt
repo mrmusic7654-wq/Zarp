@@ -25,6 +25,10 @@ class ChatRepository(private val database: ChatDatabase) {
         }
     }
 
+    suspend fun getMessagesForConversationOnce(conversationId: String): List<Message> {
+        return dao.getMessagesForConversationOnce(conversationId).map { it.toMessage() }
+    }
+
     suspend fun createNewConversation(firstMessage: String): Conversation {
         val conversationId = UUID.randomUUID().toString()
         val title = if (firstMessage.length > 40) firstMessage.take(40) + "..." else firstMessage
@@ -60,7 +64,6 @@ class ChatRepository(private val database: ChatDatabase) {
         )
         dao.insertMessage(message)
 
-        // Update conversation timestamp
         val conv = dao.getConversationById(conversationId)
         if (conv != null) {
             dao.insertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))

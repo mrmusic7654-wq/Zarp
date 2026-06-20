@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -46,7 +47,10 @@ fun InputBar(
     onResume: () -> Unit = {},
     attachedImageUris: List<Uri> = emptyList(),
     attachedFileNames: List<String> = emptyList(),
-    onRemoveAttachment: (Int) -> Unit = {}
+    onRemoveAttachment: (Int) -> Unit = {},
+    // ── Translate mode ──
+    isTranslateMode: Boolean = false,
+    onToggleTranslateMode: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -54,7 +58,7 @@ fun InputBar(
             .imePadding()
             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)
     ) {
-        // ── Multiple attachment chips (compact) ──
+        // ── Multiple attachment chips ──
         if (attachedImageUris.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -122,6 +126,22 @@ fun InputBar(
                 )
             }
 
+            // Translate toggle button (globe icon)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .clickable { onToggleTranslateMode() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Translate,
+                    contentDescription = if (isTranslateMode) "Translate mode ON" else "Translate mode OFF",
+                    tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.width(4.dp))
 
             // Text field
@@ -131,7 +151,11 @@ fun InputBar(
                     .padding(vertical = 12.dp)
             ) {
                 if (inputText.isEmpty() && !isListening) {
-                    Text("Message Zarp...", color = ZarpTextTertiary, fontSize = 16.sp)
+                    Text(
+                        text = if (isTranslateMode) "Type in any language..." else "Message Zarp...",
+                        color = ZarpTextTertiary,
+                        fontSize = 16.sp
+                    )
                 } else if (isListening) {
                     Text("Listening...", color = ZarpTextTertiary, fontSize = 16.sp)
                 }
@@ -150,7 +174,7 @@ fun InputBar(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // ── Dynamic button ──
+            // ── Dynamic button: Send / Pause / Resume / Mic ──
             Crossfade(
                 targetState = when {
                     isThinking -> "pause"
@@ -171,12 +195,7 @@ fun InputBar(
                                 .clickable { onPause() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Pause,
-                                contentDescription = "Pause",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Default.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
                     "resume" -> {
@@ -188,12 +207,7 @@ fun InputBar(
                                 .clickable { onResume() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Resume",
-                                tint = ZarpMainBg,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Icon(Icons.Default.PlayArrow, "Resume", tint = ZarpMainBg, modifier = Modifier.size(20.dp))
                         }
                     }
                     "send" -> {
@@ -205,12 +219,7 @@ fun InputBar(
                                 .clickable { onSend() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowUpward,
-                                contentDescription = "Send",
-                                tint = ZarpMainBg,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Icon(Icons.Default.ArrowUpward, "Send", tint = ZarpMainBg, modifier = Modifier.size(18.dp))
                         }
                     }
                     else -> {
@@ -221,12 +230,7 @@ fun InputBar(
                                 .clickable { onMicTap() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = "Microphone",
-                                tint = ZarpTextTertiary,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            Icon(Icons.Default.Mic, "Microphone", tint = ZarpTextTertiary, modifier = Modifier.size(24.dp))
                         }
                     }
                 }

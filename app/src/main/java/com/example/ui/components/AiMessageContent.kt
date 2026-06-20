@@ -6,11 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.ThumbDown
-import androidx.compose.material.icons.outlined.ThumbUp
-import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -48,13 +44,18 @@ fun AiMessageContent(
     message: Message,
     modifier: Modifier = Modifier,
     isSpeaking: Boolean = false,
-    onSpeak: (() -> Unit)? = null
+    isLiked: Boolean = false,
+    isDisliked: Boolean = false,
+    onSpeak: (() -> Unit)? = null,
+    onLike: (() -> Unit)? = null,
+    onDislike: (() -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showActions by remember { mutableStateOf(false) }
 
     LaunchedEffect(message.id) {
-        delay(300)
+        delay(200)
         showActions = true
     }
 
@@ -85,8 +86,11 @@ fun AiMessageContent(
 
         if (showActions) {
             Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Copy
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ── Copy ──
                 IconButton(
                     onClick = { clipboardManager.setText(AnnotatedString(message.text)) },
                     modifier = Modifier.size(32.dp)
@@ -98,7 +102,8 @@ fun AiMessageContent(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                // Speak
+
+                // ── Speak ──
                 if (onSpeak != null) {
                     IconButton(
                         onClick = onSpeak,
@@ -112,32 +117,50 @@ fun AiMessageContent(
                         )
                     }
                 }
-                // Like
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Outlined.ThumbUp,
-                        "Good response",
-                        tint = ZarpTextTertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
+
+                // ── Like ──
+                if (onLike != null) {
+                    IconButton(
+                        onClick = onLike,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (isLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                            "Like",
+                            tint = if (isLiked) ZarpAccent else ZarpTextTertiary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
-                // Dislike
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Outlined.ThumbDown,
-                        "Bad response",
-                        tint = ZarpTextTertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
+
+                // ── Dislike ──
+                if (onDislike != null) {
+                    IconButton(
+                        onClick = onDislike,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (isDisliked) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown,
+                            "Dislike",
+                            tint = if (isDisliked) Color(0xFFFF5252) else ZarpTextTertiary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
-                // Regenerate
-                IconButton(onClick = {}, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Outlined.Refresh,
-                        "Regenerate",
-                        tint = ZarpTextTertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
+
+                // ── Regenerate ──
+                if (onRegenerate != null) {
+                    IconButton(
+                        onClick = onRegenerate,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Refresh,
+                            "Regenerate",
+                            tint = ZarpTextTertiary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -217,10 +240,7 @@ fun FormattedText(text: String) {
                 remaining.startsWith("**") -> {
                     val end = remaining.indexOf("**", 2)
                     if (end != -1) {
-                        withStyle(SpanStyle(
-                            fontWeight = FontWeight.Bold,
-                            color = ZarpTextPrimary
-                        )) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = ZarpTextPrimary)) {
                             append(remaining.substring(2, end))
                         }
                         remaining = remaining.substring(end + 2)
@@ -232,10 +252,7 @@ fun FormattedText(text: String) {
                 remaining.startsWith("*") -> {
                     val end = remaining.indexOf("*", 1)
                     if (end != -1) {
-                        withStyle(SpanStyle(
-                            fontStyle = FontStyle.Italic,
-                            color = ZarpTextPrimary
-                        )) {
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = ZarpTextPrimary)) {
                             append(remaining.substring(1, end))
                         }
                         remaining = remaining.substring(end + 1)
@@ -257,20 +274,14 @@ fun FormattedText(text: String) {
                     remaining = if (newline != -1) remaining.substring(newline) else ""
                 }
                 remaining.startsWith("• ") || remaining.startsWith("- ") -> {
-                    withStyle(SpanStyle(
-                        fontWeight = FontWeight.Medium,
-                        color = AccentBlue
-                    )) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
                         append("  •  ")
                     }
                     remaining = remaining.substring(2)
                 }
                 remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") in 1..3 -> {
                     val dotIndex = remaining.indexOf(". ")
-                    withStyle(SpanStyle(
-                        fontWeight = FontWeight.Bold,
-                        color = AccentBlue
-                    )) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AccentBlue)) {
                         append(remaining.substring(0, dotIndex + 2))
                     }
                     remaining = remaining.substring(dotIndex + 2)

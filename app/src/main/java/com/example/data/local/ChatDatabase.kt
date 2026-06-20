@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class],
-    version = 2,
+    version = 1,
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -24,7 +24,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "zarp_chat_db"
                 )
-                .fallbackToDestructiveMigration(false)
+                .fallbackToDestructiveMigration()  // recreate DB on version change
                 .build()
                 INSTANCE = instance
                 instance

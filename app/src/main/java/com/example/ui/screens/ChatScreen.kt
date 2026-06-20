@@ -47,6 +47,7 @@ fun ChatScreen(
     var showModelSelector by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
+    // ── Voice input launcher ─────────────────
     val voiceLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -54,22 +55,28 @@ fun ChatScreen(
         if (!text.isNullOrBlank()) viewModel.onVoiceResult(text)
     }
 
+    // ── API key warning ─────────────────────
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
             snackbarHostState.showSnackbar("API key missing. Set it in Settings → API Keys.")
         }
     }
 
+    // ── Drawer sync ─────────────────────────
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) drawerState.open()
         else if (!uiState.isDrawerOpen && drawerState.isOpen) drawerState.close()
     }
     LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen != uiState.isDrawerOpen) viewModel.onToggleDrawer(drawerState.isOpen)
+        if (drawerState.isOpen != uiState.isDrawerOpen)
+            viewModel.onToggleDrawer(drawerState.isOpen)
     }
 
-    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
 
+    // ── Attachment sheet ────────────────────
     if (uiState.showAttachmentSheet) {
         AttachmentSheet(
             onDismiss = { viewModel.dismissAttachmentSheet() },
@@ -80,20 +87,36 @@ fun ChatScreen(
         )
     }
 
+    // ── Custom style dialog ─────────────────
     if (uiState.showStyleDialog) {
         var styleText by remember { mutableStateOf(uiState.customStyle) }
+
         AlertDialog(
             onDismissRequest = { viewModel.onDismissStyleDialog() },
-            title = { Text("🎭 Custom Response Style", color = ZarpTextPrimary, fontSize = 18.sp) },
+            title = {
+                Text("🎭 Custom Response Style", color = ZarpTextPrimary, fontSize = 18.sp)
+            },
             text = {
                 Column {
-                    Text("Describe how you want Zarp to behave:", color = ZarpTextTertiary, fontSize = 13.sp)
+                    Text(
+                        "Describe how you want Zarp to behave:",
+                        color = ZarpTextTertiary,
+                        fontSize = 13.sp
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = styleText,
                         onValueChange = { styleText = it },
-                        placeholder = { Text("e.g. Be brutally honest, roast me.", color = ZarpTextTertiary, fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        placeholder = {
+                            Text(
+                                "e.g. Be brutally honest, roast me.",
+                                color = ZarpTextTertiary,
+                                fontSize = 12.sp
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = ZarpTextPrimary,
                             unfocusedTextColor = ZarpTextPrimary,
@@ -104,10 +127,12 @@ fun ChatScreen(
                         minLines = 3
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = {
-                        viewModel.onCustomStyleChanged("")
-                        viewModel.onDismissStyleDialog()
-                    }) {
+                    TextButton(
+                        onClick = {
+                            viewModel.onCustomStyleChanged("")
+                            viewModel.onDismissStyleDialog()
+                        }
+                    ) {
                         Text("🔄 Reset to default", color = ZarpTextTertiary)
                     }
                 }
@@ -126,6 +151,35 @@ fun ChatScreen(
             dismissButton = {
                 TextButton(onClick = { viewModel.onDismissStyleDialog() }) {
                     Text("Cancel", color = ZarpTextTertiary)
+                }
+            },
+            containerColor = ZarpSidebarBg
+        )
+    }
+
+    // ── Translate result dialog ─────────────
+    if (uiState.showTranslateDialog && uiState.translateResult != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onDismissTranslateDialog() },
+            title = {
+                Text("🌐 Translation", color = ZarpTextPrimary, fontSize = 18.sp)
+            },
+            text = {
+                SelectionContainer {
+                    Text(
+                        uiState.translateResult ?: "",
+                        color = ZarpTextPrimary,
+                        fontSize = 15.sp,
+                        lineHeight = 24.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.onDismissTranslateDialog() },
+                    colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)
+                ) {
+                    Text("OK", color = Color.White)
                 }
             },
             containerColor = ZarpSidebarBg
@@ -180,9 +234,12 @@ fun ChatScreen(
                                     Icons.Default.ExpandMore,
                                     "Select Model",
                                     tint = ZarpTextPrimary,
-                                    modifier = Modifier.padding(start = 4.dp).size(20.dp)
+                                    modifier = Modifier
+                                        .padding(start = 4.dp)
+                                        .size(20.dp)
                                 )
                             }
+
                             DropdownMenu(
                                 expanded = showModelSelector,
                                 onDismissRequest = { showModelSelector = false }
@@ -190,7 +247,10 @@ fun ChatScreen(
                                 ChatViewModel.availableModels.forEach { model ->
                                     val used = UsageTracker.getCount(context, model)
                                     val limit = UsageTracker.getLimit(model)
-                                    val percentage = if (limit > 0) (used * 100 / limit).coerceIn(0, 100) else 0
+                                    val percentage =
+                                        if (limit > 0) (used * 100 / limit).coerceIn(0, 100) else 0
+                                    val isSelected = uiState.selectedModel == model
+
                                     DropdownMenuItem(
                                         text = {
                                             Column(modifier = Modifier.width(220.dp)) {
@@ -198,7 +258,8 @@ fun ChatScreen(
                                                     model,
                                                     fontSize = 14.sp,
                                                     fontWeight = FontWeight.Medium,
-                                                    color = if (uiState.selectedModel == model) ZarpAccent else ZarpTextPrimary
+                                                    color = if (isSelected) ZarpAccent
+                                                            else ZarpTextPrimary
                                                 )
                                                 Spacer(modifier = Modifier.height(2.dp))
                                                 Text(
@@ -211,13 +272,19 @@ fun ChatScreen(
                                                     Modifier
                                                         .fillMaxWidth()
                                                         .height(3.dp)
-                                                        .background(Color(0xFF444444), RoundedCornerShape(2.dp))
+                                                        .background(
+                                                            Color(0xFF444444),
+                                                            RoundedCornerShape(2.dp)
+                                                        )
                                                 ) {
                                                     Box(
                                                         Modifier
                                                             .fillMaxWidth(percentage / 100f)
                                                             .height(3.dp)
-                                                            .background(ZarpAccent, RoundedCornerShape(2.dp))
+                                                            .background(
+                                                                ZarpAccent,
+                                                                RoundedCornerShape(2.dp)
+                                                            )
                                                     )
                                                 }
                                             }
@@ -237,29 +304,42 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        // Stop button (visible when thinking or paused)
                         if (uiState.isAiThinking || uiState.isPaused) {
                             IconButton(onClick = { viewModel.onStopGeneration() }) {
                                 Icon(
                                     Icons.Default.Stop,
-                                    "Stop",
+                                    "Stop generation",
                                     tint = Color(0xFFFF5252),
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
+                        // Style button
                         IconButton(onClick = { viewModel.onShowStyleDialog() }) {
                             Icon(
                                 Icons.Default.Tune,
-                                "Style",
-                                tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary,
+                                "Response style",
+                                tint = if (uiState.customStyle.isNotBlank()) ZarpAccent
+                                       else ZarpTextTertiary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+                        // New chat button
                         IconButton(onClick = { viewModel.onNewChat() }) {
-                            Icon(Icons.Outlined.Edit, "New chat", tint = ZarpTextPrimary)
+                            Icon(
+                                Icons.Outlined.Edit,
+                                "New chat",
+                                tint = ZarpTextPrimary
+                            )
                         }
+                        // More options
                         IconButton(onClick = { }) {
-                            Icon(Icons.Default.MoreVert, "Options", tint = ZarpTextPrimary)
+                            Icon(
+                                Icons.Default.MoreVert,
+                                "Options",
+                                tint = ZarpTextPrimary
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -275,14 +355,16 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
+                // ── Messages ──
                 MessageList(
                     messages = uiState.messages,
                     isAiThinking = uiState.isAiThinking,
                     modifier = Modifier.weight(1f),
                     speakingMessageId = uiState.speakingMessageId,
-                    onSpeakMessage = { id, text -> viewModel.onSpeakMessage(id, text) },
-                    onTranslateMessage = { id, text -> viewModel.onTranslateMessage(id, text) }
+                    onSpeakMessage = { id, text -> viewModel.onSpeakMessage(id, text) }
                 )
+
+                // ── Input bar ──
                 InputBar(
                     inputText = uiState.inputText,
                     onInputChanged = { viewModel.onInputChanged(it) },
@@ -296,7 +378,9 @@ fun ChatScreen(
                     onResume = { viewModel.onResumeGeneration() },
                     attachedImageUris = uiState.selectedImageUris,
                     attachedFileNames = uiState.selectedFileNames,
-                    onRemoveAttachment = { index -> viewModel.removeSingleAttachment(index) }
+                    onRemoveAttachment = { index -> viewModel.removeSingleAttachment(index) },
+                    isTranslateMode = uiState.isTranslateMode,
+                    onToggleTranslateMode = { viewModel.onToggleTranslateMode() }
                 )
             }
         }

@@ -1,5 +1,6 @@
 package com.example.data
 
+import android.util.Log
 import com.example.data.local.ChatDatabase
 import com.example.data.local.ConversationEntity
 import com.example.data.local.MessageEntity
@@ -26,7 +27,12 @@ class ChatRepository(private val database: ChatDatabase) {
     }
 
     suspend fun getMessagesForConversationOnce(conversationId: String): List<Message> {
-        return dao.getMessagesForConversationOnce(conversationId).map { it.toMessage() }
+        val messages = dao.getMessagesForConversationOnce(conversationId)
+        Log.d("ChatRepo", "📂 Conversation $conversationId: loaded ${messages.size} messages")
+        messages.forEach { msg ->
+            Log.d("ChatRepo", "   ${if (msg.isUser) "👤" else "🤖"} ${msg.text.take(50)}...")
+        }
+        return messages.map { it.toMessage() }
     }
 
     suspend fun createNewConversation(firstMessage: String): Conversation {
@@ -41,7 +47,9 @@ class ChatRepository(private val database: ChatDatabase) {
             lastUpdated = now
         )
         dao.insertConversation(conversation)
+        Log.d("ChatRepo", "✅ Created conversation: $conversationId - $title")
 
+        // Only insert the user message here ONCE
         val userMessage = MessageEntity(
             id = UUID.randomUUID().toString(),
             conversationId = conversationId,
@@ -50,6 +58,7 @@ class ChatRepository(private val database: ChatDatabase) {
             timestamp = now
         )
         dao.insertMessage(userMessage)
+        Log.d("ChatRepo", "✅ Inserted user message into $conversationId")
 
         return conversation.toConversation()
     }
@@ -63,7 +72,9 @@ class ChatRepository(private val database: ChatDatabase) {
             timestamp = System.currentTimeMillis()
         )
         dao.insertMessage(message)
+        Log.d("ChatRepo", "✅ Inserted ${if (isUser) "user" else "AI"} message into $conversationId: ${text.take(40)}...")
 
+        // Update conversation timestamp
         val conv = dao.getConversationById(conversationId)
         if (conv != null) {
             dao.insertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
@@ -72,13 +83,7 @@ class ChatRepository(private val database: ChatDatabase) {
 
     suspend fun deleteConversation(conversationId: String) {
         dao.deleteConversationWithMessages(conversationId)
-    }
-
-    suspend fun updateConversationTitle(conversationId: String, title: String) {
-        val conv = dao.getConversationById(conversationId)
-        if (conv != null) {
-            dao.insertConversation(conv.copy(title = title))
-        }
+        Log.d("ChatRepo", "🗑️ Deleted conversation $conversationId")
     }
 
     private fun ConversationEntity.toConversation() = Conversation(

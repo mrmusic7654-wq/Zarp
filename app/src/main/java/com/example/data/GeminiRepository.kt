@@ -53,20 +53,17 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
     private suspend fun buildContext(history: List<Message>, currentPrompt: String): String {
         if (history.isEmpty()) return ""
 
-        // Search for relevant older messages using embeddings
         val relevant = embeddingManager.searchSimilar(currentPrompt, topK = 3)
         val relevantSet = relevant.toSet()
 
         val sb = StringBuilder()
 
-        // Always include last 5 messages
         val recent = history.takeLast(fullContextCount)
         for (msg in recent) {
             val role = if (msg.isUser) "User" else "Zarp"
             sb.appendLine("$role: ${msg.text}")
         }
 
-        // Add embedding‑matched messages (skip if already in recent)
         val olderRelevant = history.filter { it.text in relevantSet && it !in recent }
         if (olderRelevant.isNotEmpty()) {
             sb.appendLine("\n--- Related earlier messages ---")
@@ -77,7 +74,6 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
             sb.appendLine("--- End related ---\n")
         }
 
-        // Summarise the rest
         val rest = history.filter { it !in recent && it !in olderRelevant }
         if (rest.isNotEmpty()) {
             val userLines = rest.filter { it.isUser }.map { it.text }
@@ -166,7 +162,7 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
     suspend fun translate(text: String, targetLang: String): String = withContext(Dispatchers.IO) {
         val key = KeyManager.getGeminiKey(context) ?: return@withContext "⚠️ API key not set."
         val model = GenerativeModel(
-            modelName = "models/gemini-3.5-flash",  // Good multilingual model
+            modelName = "models/gemini-3.5-flash",
             apiKey = key,
             generationConfig = com.google.ai.client.generativeai.type.generationConfig {
                 temperature = 0.2f

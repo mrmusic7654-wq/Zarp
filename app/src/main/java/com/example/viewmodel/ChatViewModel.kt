@@ -245,7 +245,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch {
             try {
-                val msgs = chatRepository.getMessagesForConversation(id).first()
+                val msgs = chatRepository.getMessagesForConversationOnce(id)
+                Log.d("ChatViewModel", "Loaded ${msgs.size} messages for conversation $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Failed to load conversation $id", e)
@@ -283,7 +284,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun onImagesSelected(uris: List<Uri>) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        uris.forEachIndexed { i, uri ->
+        uris.forEach { uri ->
             currentUris.add(uri)
             currentNames.add("Image ${currentUris.size}")
         }

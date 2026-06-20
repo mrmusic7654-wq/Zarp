@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ThumbDown
-import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.outlined.ThumbDown
+import androidx.compose.material.icons.outlined.ThumbUp
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.VolumeUp
@@ -121,36 +121,35 @@ fun AiMessageContent(
                         )
                     }
                 }
+               // Like
+if (onLike != null) {
+    IconButton(
+        onClick = onLike,
+        modifier = Modifier.size(32.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.ThumbUp,
+            contentDescription = "Like",
+            tint = if (isLiked) ZarpAccent else ZarpTextTertiary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
 
-                // Like
-                if (onLike != null) {
-                    IconButton(
-                        onClick = onLike,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isLiked) ThumbUp else Icons.Outlined.ThumbUp,
-                            contentDescription = "Like",
-                            tint = if (isLiked) ZarpAccent else ZarpTextTertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Dislike
-                if (onDislike != null) {
-                    IconButton(
-                        onClick = onDislike,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isDisliked) ThumbDown else Icons.Outlined.ThumbDown,
-                            contentDescription = "Dislike",
-                            tint = if (isDisliked) Color(0xFFFF5252) else ZarpTextTertiary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
+// Dislike
+if (onDislike != null) {
+    IconButton(
+        onClick = onDislike,
+        modifier = Modifier.size(32.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.ThumbDown,
+            contentDescription = "Dislike",
+            tint = if (isDisliked) Color(0xFFFF5252) else ZarpTextTertiary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
 
                 // Regenerate
                 if (onRegenerate != null) {

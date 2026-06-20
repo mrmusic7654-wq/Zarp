@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.text.selection.SelectionContainer
 import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Edit
@@ -53,7 +53,12 @@ fun ChatScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        if (!text.isNullOrBlank()) viewModel.onVoiceResult(text)
+        if (!text.isNullOrBlank()) {
+            viewModel.onVoiceResult(text)
+        } else {
+            // User cancelled voice input
+            viewModel.onCancelVoice()
+        }
     }
 
     // ── API key warning ─────────────────────
@@ -305,7 +310,7 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        // Stop button (visible when thinking or paused)
+                        // Stop button
                         if (uiState.isAiThinking || uiState.isPaused) {
                             IconButton(onClick = { viewModel.onStopGeneration() }) {
                                 Icon(
@@ -326,21 +331,13 @@ fun ChatScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        // New chat button
+                        // New chat
                         IconButton(onClick = { viewModel.onNewChat() }) {
-                            Icon(
-                                Icons.Outlined.Edit,
-                                "New chat",
-                                tint = ZarpTextPrimary
-                            )
+                            Icon(Icons.Outlined.Edit, "New chat", tint = ZarpTextPrimary)
                         }
-                        // More options
+                        // More
                         IconButton(onClick = { }) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                "Options",
-                                tint = ZarpTextPrimary
-                            )
+                            Icon(Icons.Default.MoreVert, "Options", tint = ZarpTextPrimary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(

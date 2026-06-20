@@ -23,10 +23,6 @@ class TTSManager(private val context: Context) {
     private var mediaPlayer: MediaPlayer? = null
     private var currentFile: File? = null
 
-    /**
-     * Speaks the given text using Gemini TTS.
-     * Automatically cleans up resources when done.
-     */
     suspend fun speak(text: String, onComplete: () -> Unit) {
         val key = KeyManager.getGeminiKey(context)
         if (key == null) {
@@ -52,11 +48,7 @@ class TTSManager(private val context: Context) {
 
         try {
             Log.d(TAG, "Requesting TTS for: ${text.take(50)}...")
-            val response = model.generateContent(
-                content {
-                    text(text)
-                }
-            )
+            val response = model.generateContent(content { text(text) })
 
             val responseText = response.text
             if (responseText.isNullOrBlank()) {
@@ -79,9 +71,6 @@ class TTSManager(private val context: Context) {
         }
     }
 
-    /**
-     * Stops current playback immediately and cleans up.
-     */
     fun stop() {
         try {
             mediaPlayer?.apply {
@@ -95,9 +84,6 @@ class TTSManager(private val context: Context) {
         cleanupFile()
     }
 
-    /**
-     * Returns true if audio is currently playing.
-     */
     fun isPlaying(): Boolean {
         return try {
             mediaPlayer?.isPlaying == true
@@ -106,33 +92,33 @@ class TTSManager(private val context: Context) {
         }
     }
 
-    // ─── Private helpers ────────────────────
-
-    /**
-     * Extracts base64-encoded audio from the TTS JSON response.
-     * Handles multiple possible JSON field names.
-     */
     private fun extractAudioFromResponse(responseText: String): ByteArray? {
         return try {
             val json = JSONObject(responseText)
 
-            // Try different possible field names for audio data
-            val audioBase64 = json.optString("audio", "")
-                .ifBlank { json.optString("audio_data", "") }
-                .ifBlank { json.optString("audioContent", "") }
-                .ifBlank { json.optString("data", "") }
+            var audioBase64: String? = null
 
-            if (audioBase64.isBlank()) {
-                // Check if there's a nested object
-                val candidates = json.optJSONObject("candidates")
-                val content = candidates?.optJSONArray("content")
-                val firstPart = content?.optJSONObject(0)?.optJSONObject("inlineData")
-                val nestedBase64 = firstPart?.optString("data", "")
-                if (nestedBase64.isNotBlank()) {
-                    return Base64.decode(nestedBase64, Base64.DEFAULT)
+            // Try top-level fields
+            if (json.has("audio")) audioBase64 = json.optString("audio", null)
+            if (audioBase64.isNullOrBlank() && json.has("audio_data")) audioBase64 = json.optString("audio_data", null)
+            if (audioBase64.isNullOrBlank() && json.has("audioContent")) audioBase64 = json.optString("audioContent", null)
+            if (audioBase64.isNullOrBlank() && json.has("data")) audioBase64 = json.optString("data", null)
+
+            // Try nested candidates[0].content[0].inlineData.data
+            if (audioBase64.isNullOrBlank()) {
+                val candidates = json.optJSONArray("candidates")
+                val firstCandidate = candidates?.optJSONObject(0)
+                val content = firstCandidate?.optJSONArray("content")
+                val firstPart = content?.optJSONObject(0)
+                val inlineData = firstPart?.optJSONObject("inlineData")
+                val nestedData = inlineData?.optString("data", null)
+                if (!nestedData.isNullOrBlank()) {
+                    audioBase64 = nestedData
                 }
+            }
 
-                Log.e(TAG, "No audio field found in response")
+            if (audioBase64.isNullOrBlank()) {
+                Log.e(TAG, "No audio field found in TTS response")
                 return null
             }
 
@@ -143,23 +129,17 @@ class TTSManager(private val context: Context) {
         }
     }
 
-    /**
-     * Plays audio bytes using MediaPlayer on the main thread.
-     */
     private suspend fun playAudio(audioBytes: ByteArray, onComplete: () -> Unit) {
         withContext(Dispatchers.Main) {
             try {
-                // Clean up previous player
                 mediaPlayer?.release()
                 mediaPlayer = null
                 cleanupFile()
 
-                // Write audio to cache file
                 val file = File(context.cacheDir, "zarp_speech_${System.currentTimeMillis()}.mp3")
                 FileOutputStream(file).use { it.write(audioBytes) }
                 currentFile = file
 
-                // Create and configure MediaPlayer
                 mediaPlayer = MediaPlayer().apply {
                     setAudioAttributes(
                         AudioAttributes.Builder()
@@ -200,9 +180,6 @@ class TTSManager(private val context: Context) {
         }
     }
 
-    /**
-     * Deletes the temporary audio file.
-     */
     private fun cleanupFile() {
         try {
             currentFile?.delete()

@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ChatRepository
 import com.example.data.GeminiRepository
+import com.example.data.TTSManager
 import com.example.data.UsageTracker
 import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
@@ -35,24 +36,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val selectedModel: String = "Gemini 2.5 Flash",
         val customStyle: String = "",
         val showStyleDialog: Boolean = false,
-        val isDarkTheme: Boolean = true
+        val isDarkTheme: Boolean = true,
+        val isSpeaking: Boolean = false,
+        val speakingMessageId: String? = null,
+        val isTranslateMode: Boolean = false,
+        val translateLanguage: String = "English",
+        val isTranslating: Boolean = false,
+        val translateResult: String? = null,
+        val showTranslateDialog: Boolean = false
     )
 
     companion object {
         val availableModels = listOf(
+            "Gemini 3.5 Flash",
+            "Gemini 3 Flash Preview",
+            "Gemini 3.1 Flash-Lite",
+            "Gemini 2.5 Pro",
             "Gemini 2.5 Flash",
             "Gemini 2.5 Flash-Lite",
-            "Gemini 3 Flash Preview",
-            "Gemini 3.1 Flash Lite Preview",
+            "Gemini 2.5 Flash-Lite Preview",
             "Gemma 4 26B",
             "Gemma 4 31B"
         )
 
         fun getModelApiName(displayName: String): String = when (displayName) {
+            "Gemini 3.5 Flash"               -> "models/gemini-3.5-flash"
+            "Gemini 3 Flash Preview"         -> "models/gemini-3-flash-preview"
+            "Gemini 3.1 Flash-Lite"          -> "models/gemini-3.1-flash-lite"
+            "Gemini 2.5 Pro"                 -> "models/gemini-2.5-pro"
             "Gemini 2.5 Flash"               -> "models/gemini-2.5-flash"
             "Gemini 2.5 Flash-Lite"          -> "models/gemini-2.5-flash-lite"
-            "Gemini 3 Flash Preview"         -> "models/gemini-3-flash-preview"
-            "Gemini 3.1 Flash Lite Preview"  -> "models/gemini-3.1-flash-lite-preview"
+            "Gemini 2.5 Flash-Lite Preview"  -> "models/gemini-2.5-flash-lite-preview-09-2025"
             "Gemma 4 26B"                    -> "models/gemma-4-26b-a4b-it"
             "Gemma 4 31B"                    -> "models/gemma-4-31b-it"
             else -> "models/gemini-2.5-flash"
@@ -62,6 +76,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val database = ChatDatabase.getInstance(application)
     private val chatRepository = ChatRepository(database)
     private val geminiRepository = GeminiRepository(application)
+    private val ttsManager = TTSManager(application)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -82,10 +97,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(inputText = text)
     }
 
+    fun onToggleTranslateMode() {
+        _uiState.value = _uiState.value.copy(isTranslateMode = !_uiState.value.isTranslateMode)
+    }
+
     fun onSend() {
-        val currentText = _uiState.value.inputText.ifBlank { lastPrompt }
+        var currentText = _uiState.value.inputText.ifBlank { lastPrompt }
         val imageUris = _uiState.value.selectedImageUris.ifEmpty { lastImageUris }
         var conversationId = _uiState.value.currentConversationId
+        val isTranslateMode = _uiState.value.isTranslateMode
 
         if (currentText.isBlank() && imageUris.isEmpty()) return
 
@@ -93,7 +113,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastImageUris = imageUris
 
         val imageCount = imageUris.size
-        val displayText = when {
+        val originalDisplayText = when {
             currentText.isNotBlank() && imageCount > 0 -> "$currentText\n📷 $imageCount image(s) attached"
             currentText.isNotBlank() -> currentText
             imageCount > 0 -> "📷 $imageCount image(s) attached"
@@ -102,7 +122,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val userMessage = Message(
             id = UUID.randomUUID().toString(),
-            text = displayText,
+            text = originalDisplayText,
             isUser = true,
             timestamp = System.currentTimeMillis()
         )
@@ -119,18 +139,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         currentGenerationJob = viewModelScope.launch {
             try {
+                // If translate mode ON, translate the input to English first
+                if (isTranslateMode && currentText.isNotBlank()) {
+                    currentText = geminiRepository.translate(currentText, "English")
+                }
+
                 if (conversationId == null) {
-                    val newConv = chatRepository.createNewConversation(displayText)
+                    val newConv = chatRepository.createNewConversation(originalDisplayText)
                     conversationId = newConv.id
                     _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
                 } else {
-                    chatRepository.addMessageToConversation(conversationId, displayText, true)
+                    chatRepository.addMessageToConversation(conversationId, originalDisplayText, true)
                 }
 
                 val history = currentMessages.dropLast(1)
                 val modelName = getModelApiName(_uiState.value.selectedModel)
 
-                val responseText = if (imageUris.isNotEmpty()) {
+                var responseText = if (imageUris.isNotEmpty()) {
                     geminiRepository.generateResponseWithImage(
                         currentText, imageUris.first(), modelName, history, _uiState.value.customStyle
                     )
@@ -140,8 +165,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
+                // If translate mode ON, translate response back to the user's language
+                if (isTranslateMode) {
+                    responseText = geminiRepository.translate(responseText, _uiState.value.translateLanguage)
+                }
+
                 UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)
                 chatRepository.addMessageToConversation(conversationId, responseText, false)
+
+                viewModelScope.launch {
+                    geminiRepository.storeMessageEmbedding(responseText)
+                }
 
                 val aiMessage = Message(
                     id = UUID.randomUUID().toString(),
@@ -214,6 +248,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onSpeakMessage(messageId: String, text: String) {
+        if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) {
+            onStopSpeaking()
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId)
+            ttsManager.speak(text) {
+                _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
+            }
+        }
+    }
+
+    fun onStopSpeaking() {
+        ttsManager.stop()
+        _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
+    }
+
+    fun onTranslateMessage(messageId: String, text: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isTranslating = true)
+            val translated = geminiRepository.translate(text, _uiState.value.translateLanguage)
+            _uiState.value = _uiState.value.copy(
+                translateResult = translated,
+                showTranslateDialog = true,
+                isTranslating = false
+            )
+        }
+    }
+
+    fun onDismissTranslateDialog() {
+        _uiState.value = _uiState.value.copy(showTranslateDialog = false, translateResult = null)
+    }
+
+    fun onUpdateTranslateLanguage(lang: String) {
+        _uiState.value = _uiState.value.copy(translateLanguage = lang)
+    }
+
     fun onNewChat() {
         currentGenerationJob?.cancel()
         currentGenerationJob = null
@@ -246,7 +318,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val msgs = chatRepository.getMessagesForConversationOnce(id)
-                Log.d("ChatViewModel", "Loaded ${msgs.size} messages for conversation $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Failed to load conversation $id", e)
@@ -262,114 +333,60 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onAttachmentTap() {
-        _uiState.value = _uiState.value.copy(showAttachmentSheet = true)
-    }
-
-    fun dismissAttachmentSheet() {
-        _uiState.value = _uiState.value.copy(showAttachmentSheet = false)
-    }
+    fun onAttachmentTap() { _uiState.value = _uiState.value.copy(showAttachmentSheet = true) }
+    fun dismissAttachmentSheet() { _uiState.value = _uiState.value.copy(showAttachmentSheet = false) }
 
     fun onImageSelected(uri: Uri) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        currentUris.add(uri)
-        currentNames.add("Image ${currentUris.size}")
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = currentUris,
-            selectedFileNames = currentNames
-        )
+        currentUris.add(uri); currentNames.add("Image ${currentUris.size}")
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
 
     fun onImagesSelected(uris: List<Uri>) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        uris.forEach { uri ->
-            currentUris.add(uri)
-            currentNames.add("Image ${currentUris.size}")
-        }
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = currentUris,
-            selectedFileNames = currentNames
-        )
+        uris.forEach { uri -> currentUris.add(uri); currentNames.add("Image ${currentUris.size}") }
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
 
     fun onFileSelected(uri: Uri, name: String) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        currentUris.add(uri)
-        currentNames.add(name)
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = currentUris,
-            selectedFileNames = currentNames
-        )
+        currentUris.add(uri); currentNames.add(name)
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
 
     fun onFilesSelected(uris: List<Uri>) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        uris.forEach { uri ->
-            currentUris.add(uri)
-            currentNames.add("File ${currentUris.size}")
-        }
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = currentUris,
-            selectedFileNames = currentNames
-        )
+        uris.forEach { uri -> currentUris.add(uri); currentNames.add("File ${currentUris.size}") }
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
 
     fun removeSingleAttachment(index: Int) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        if (index in currentUris.indices) {
-            currentUris.removeAt(index)
-            currentNames.removeAt(index)
-        }
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = currentUris,
-            selectedFileNames = currentNames
-        )
+        if (index in currentUris.indices) { currentUris.removeAt(index); currentNames.removeAt(index) }
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
     }
 
     fun clearImageSelection() {
-        _uiState.value = _uiState.value.copy(
-            selectedImageUris = emptyList(),
-            selectedFileNames = emptyList()
-        )
+        _uiState.value = _uiState.value.copy(selectedImageUris = emptyList(), selectedFileNames = emptyList())
     }
 
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
         viewModelScope.launch {
             delay(2000)
-            _uiState.value = _uiState.value.copy(
-                isListening = false,
-                inputText = "What's the weather today?"
-            )
+            _uiState.value = _uiState.value.copy(isListening = false, inputText = "What's the weather today?")
         }
     }
 
-    fun onToggleDrawer(isOpen: Boolean) {
-        _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen)
-    }
-
-    fun onModelSelected(model: String) {
-        _uiState.value = _uiState.value.copy(selectedModel = model)
-    }
-
-    fun onCustomStyleChanged(style: String) {
-        _uiState.value = _uiState.value.copy(customStyle = style)
-    }
-
-    fun onShowStyleDialog() {
-        _uiState.value = _uiState.value.copy(showStyleDialog = true)
-    }
-
-    fun onDismissStyleDialog() {
-        _uiState.value = _uiState.value.copy(showStyleDialog = false)
-    }
-
-    fun onToggleTheme() {
-        _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme)
-    }
+    fun onToggleDrawer(isOpen: Boolean) { _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen) }
+    fun onModelSelected(model: String) { _uiState.value = _uiState.value.copy(selectedModel = model) }
+    fun onCustomStyleChanged(style: String) { _uiState.value = _uiState.value.copy(customStyle = style) }
+    fun onShowStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = true) }
+    fun onDismissStyleDialog() { _uiState.value = _uiState.value.copy(showStyleDialog = false) }
+    fun onToggleTheme() { _uiState.value = _uiState.value.copy(isDarkTheme = !_uiState.value.isDarkTheme) }
 }

@@ -57,7 +57,7 @@ fun AttachmentSheet(
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
-    // Camera — single shot
+    // Camera launcher
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
@@ -74,7 +74,7 @@ fun AttachmentSheet(
         else Toast.makeText(context, "Camera permission denied", Toast.LENGTH_SHORT).show()
     }
 
-    // Gallery — MULTIPLE images at once
+    // Gallery — multiple images
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -84,7 +84,7 @@ fun AttachmentSheet(
         }
     }
 
-    // File picker — MULTIPLE files at once
+    // File picker — ALL file types (*/*)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
@@ -104,6 +104,7 @@ fun AttachmentSheet(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp)
         ) {
+            // Camera
             AttachmentOption(
                 icon = Icons.Outlined.CameraAlt,
                 text = "Camera",
@@ -115,21 +116,24 @@ fun AttachmentSheet(
                     else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                 }
             )
+
+            // Gallery (images only)
             AttachmentOption(
                 icon = Icons.Outlined.PhotoLibrary,
                 text = "Photo & Video Library",
-                onClick = {
-                    galleryLauncher.launch("image/*")
-                }
+                onClick = { galleryLauncher.launch("image/*") }
             )
+
+            // Files (ALL types: PDF, ZIP, DOC, etc.)
             AttachmentOption(
                 icon = Icons.AutoMirrored.Outlined.InsertDriveFile,
-                text = "File",
-                onClick = {
-                    filePickerLauncher.launch(arrayOf("*/*"))
-                }
+                text = "File (PDF, ZIP, DOC, any)",
+                onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
             )
+
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Google Drive (placeholder)
             AttachmentOption(
                 icon = Icons.Rounded.Folder,
                 text = "Connect to Google Drive",

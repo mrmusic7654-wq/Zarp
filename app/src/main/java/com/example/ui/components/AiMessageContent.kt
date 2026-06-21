@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+app/src/main/java/com/example/data/GeminiRepository.kt
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically

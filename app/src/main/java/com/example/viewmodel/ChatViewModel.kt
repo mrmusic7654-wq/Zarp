@@ -169,7 +169,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     messages = _uiState.value.messages + Message(UUID.randomUUID().toString(), responseText, false, System.currentTimeMillis()),
                     isAiThinking = false
                 )
-                lastPrompt = ""; lastImageUris = emptyList()
+                lastUserPrompt = ""; lastImageUris = emptyList()
             } catch (e: CancellationException) {
                 if (!_uiState.value.isPaused) _uiState.value = _uiState.value.copy(isAiThinking = false, messages = _uiState.value.messages + Message(UUID.randomUUID().toString(), "⏹️ Stopped.", false, System.currentTimeMillis()))
                 throw e

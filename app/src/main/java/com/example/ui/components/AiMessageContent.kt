@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -8,46 +7,59 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.Message
-import com.example.ui.theme.ZarpAccent
-import com.example.ui.theme.ZarpCodeBg
-import com.example.ui.theme.ZarpDivider
-import com.example.ui.theme.ZarpTextPrimary
-import com.example.ui.theme.ZarpTextSecondary
-import com.example.ui.theme.ZarpTextTertiary
+import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 
+// ═══════════════════════════════════════════
+// Color Constants
+// ═══════════════════════════════════════════
 private val AccentBlue = Color(0xFF75B6FF)
 private val ThinkBg = Color(0xFF1A1A2E)
 private val ThinkBorder = Color(0xFF4A4A7F)
+private val ThinkText = Color(0xFF9B9BFF)
+private val ThinkContent = Color(0xFFC0C0E0)
 private val CodeHeaderBg = Color(0xFF252540)
-private val SearchBg = Color(0xFF1A2E1A)
-private val SearchBorder = Color(0xFF2E5A2E)
+private val SearchBg = Color(0xFF0D1F0D)
+private val SearchBorder = Color(0xFF1A3A1A)
+private val SearchHeaderText = Color(0xFF8FDF8F)
+private val SearchTitleText = Color(0xFFC8E6C9)
+private val SearchUrlText = Color(0xFF81C784)
+private val SearchNumberText = Color(0xFF6AAF6A)
+private val LikeRed = Color(0xFFFF5252)
+private val DislikeRed = Color(0xFFFF5252)
+private val InlineCodeBg = Color(0xFF2A2A40)
+private val InlineCodeColor = Color(0xFFE0A0FF)
+private val TableColor = Color(0xFFC0C0FF)
+
+// ═══════════════════════════════════════════
+// Main Composable
+// ═══════════════════════════════════════════
 
 @Composable
 fun AiMessageContent(
@@ -62,10 +74,11 @@ fun AiMessageContent(
     onRegenerate: (() -> Unit)? = null
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
     var showActions by remember { mutableStateOf(false) }
 
     LaunchedEffect(message.id) {
-        delay(200)
+        delay(250)
         showActions = true
     }
 
@@ -74,14 +87,14 @@ fun AiMessageContent(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // ── Web sources panel (collapsible) ──
+        // ── WEB SOURCES PANEL ──
         val sources = extractSources(message.text)
         if (sources.isNotEmpty()) {
-            WebSourcesPanel(sources = sources)
-            Spacer(modifier = Modifier.height(6.dp))
+            WebSourcesPanel(sources = sources, uriHandler = uriHandler)
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // ── Message content ──
+        // ── MESSAGE CONTENT ──
         SelectionContainer {
             Column {
                 val content = stripSources(message.text)
@@ -102,137 +115,249 @@ fun AiMessageContent(
             }
         }
 
-        // ── Action buttons ──
-        if (showActions) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Outlined.ContentCopy, "Copy", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
-                }
+        // ── ACTION BUTTONS ──
+        AnimatedVisibility(
+            visible = showActions,
+            enter = expandVertically() + androidx.compose.animation.fadeIn()
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                // Copy
+                ActionButton(
+                    icon = Icons.Outlined.ContentCopy,
+                    contentDescription = "Copy",
+                    onClick = { clipboardManager.setText(AnnotatedString(message.text)) }
+                )
+
+                // Speak
                 if (onSpeak != null) {
-                    IconButton(onClick = onSpeak, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.VolumeUp, "Speak", tint = if (isSpeaking) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp))
-                    }
+                    ActionButton(
+                        icon = Icons.Outlined.VolumeUp,
+                        contentDescription = "Speak",
+                        isActive = isSpeaking,
+                        activeColor = ZarpAccent,
+                        onClick = onSpeak
+                    )
                 }
+
+                // Like
                 if (onLike != null) {
-                    IconButton(onClick = onLike, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.ThumbUp, "Like", tint = if (isLiked) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp))
-                    }
+                    ActionButton(
+                        icon = if (isLiked) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp,
+                        contentDescription = "Like",
+                        isActive = isLiked,
+                        activeColor = ZarpAccent,
+                        onClick = onLike
+                    )
                 }
+
+                // Dislike
                 if (onDislike != null) {
-                    IconButton(onClick = onDislike, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.ThumbDown, "Dislike", tint = if (isDisliked) Color(0xFFFF5252) else ZarpTextTertiary, modifier = Modifier.size(18.dp))
-                    }
+                    ActionButton(
+                        icon = if (isDisliked) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown,
+                        contentDescription = "Dislike",
+                        isActive = isDisliked,
+                        activeColor = DislikeRed,
+                        onClick = onDislike
+                    )
                 }
+
+                // Regenerate
                 if (onRegenerate != null) {
-                    IconButton(onClick = onRegenerate, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.Refresh, "Regenerate", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
-                    }
+                    ActionButton(
+                        icon = Icons.Outlined.Refresh,
+                        contentDescription = "Regenerate",
+                        onClick = onRegenerate
+                    )
                 }
             }
         }
     }
 }
 
-// ── Web Sources Collapsible Panel ──
+// ═══════════════════════════════════════════
+// Action Button
+// ═══════════════════════════════════════════
+
 @Composable
-private fun WebSourcesPanel(sources: List<Pair<String, String>>) {
-    var expanded by remember { mutableStateOf(false) }
+private fun ActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    isActive: Boolean = false,
+    activeColor: Color = ZarpAccent
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(32.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (isActive) activeColor else ZarpTextTertiary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+// ═══════════════════════════════════════════
+// Web Sources Panel
+// ═══════════════════════════════════════════
+
+@Composable
+private fun WebSourcesPanel(
+    sources: List<Pair<String, String>>,
+    uriHandler: androidx.compose.ui.platform.UriHandler
+) {
+    var expanded by remember { mutableStateOf(true) } // Start expanded for visibility
+
+    // Collapse after 3 seconds
+    LaunchedEffect(sources) {
+        delay(3000)
+        expanded = false
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(SearchBg)
-            .border(1.dp, SearchBorder, RoundedCornerShape(10.dp))
+            .border(1.dp, SearchBorder, RoundedCornerShape(12.dp))
     ) {
-        // Header row — always visible
+        // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { expanded = !expanded }
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("🌐", fontSize = 14.sp)
-            Spacer(modifier = Modifier.width(6.dp))
+            Text("🌐", fontSize = 15.sp)
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                "Searched ${sources.size} website${if (sources.size > 1) "s" else ""}",
-                color = Color(0xFF8FDF8F),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
+                text = "Searched ${sources.size} website${if (sources.size != 1) "s" else ""}",
+                color = SearchHeaderText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
             Icon(
-                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                "Toggle sources",
-                tint = Color(0xFF8FDF8F),
-                modifier = Modifier.size(16.dp)
+                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = "Toggle sources",
+                tint = SearchHeaderText,
+                modifier = Modifier.size(18.dp)
             )
         }
 
-        // Expandable source list
+        // Source list
         AnimatedVisibility(
             visible = expanded,
-            enter = expandVertically(),
-            exit = shrinkVertically()
+            enter = expandVertically(animationSpec = tween(300)),
+            exit = shrinkVertically(animationSpec = tween(200))
         ) {
             Column(
-                modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
             ) {
-                HorizontalDivider(color = SearchBorder, modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(
+                    color = SearchBorder,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
                 sources.forEachIndexed { index, (title, url) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            "${index + 1}.",
-                            color = Color(0xFF6AAF6A),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.width(16.dp)
-                        )
-                        Column {
-                            Text(
-                                title.ifBlank { "Untitled" },
-                                color = Color(0xFFC8E6C9),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                url,
-                                color = Color(0xFF81C784),
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    SourceItem(
+                        index = index + 1,
+                        title = title,
+                        url = url,
+                        onClick = {
+                            try {
+                                uriHandler.openUri(url)
+                            } catch (_: Exception) {}
                         }
-                    }
+                    )
                 }
             }
         }
     }
 }
 
-// ── Extract [Source: title - url] pairs from response ──
+@Composable
+private fun SourceItem(
+    index: Int,
+    title: String,
+    url: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = "$index.",
+            color = SearchNumberText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(18.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title.ifBlank { "Untitled" },
+                color = SearchTitleText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = url,
+                color = SearchUrlText,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textDecoration = TextDecoration.Underline
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════
+// Source Extraction
+// ═══════════════════════════════════════════
+
 private fun extractSources(text: String): List<Pair<String, String>> {
-    val regex = Regex("\\[Source:\\s*(.+?)\\s*-\\s*(https?://[^\\]]+)\\]")
-    return regex.findAll(text).map { match ->
-        Pair(match.groupValues[1].trim(), match.groupValues[2].trim())
+    // Match BOTH formats:
+    // 1. [Source: title](url)
+    // 2. [Source: title - url]
+    val regex = Regex(
+        "\\[Source:\\s*(.+?)\\]\\((https?://[^\\)]+)\\)" +
+        "|" +
+        "\\[Source:\\s*(.+?)\\s*-\\s*(https?://[^\\]]+)\\]"
+    )
+    return regex.findAll(text).mapNotNull { match ->
+        val g = match.groupValues
+        when {
+            g[1].isNotBlank() && g[2].isNotBlank() -> Pair(g[1].trim(), g[2].trim())
+            g[3].isNotBlank() && g[4].isNotBlank() -> Pair(g[3].trim(), g[4].trim())
+            else -> null
+        }
     }.toList()
 }
 
-// ── Strip source lines from displayed text ──
 private fun stripSources(text: String): String {
-    return text.replace(Regex("\\[Source:.*?\\]\\n?"), "").trim()
+    return text
+        .replace(Regex("\\[Source:.*?\\]\\(https?://[^\\)]+\\)\\n?"), "")
+        .replace(Regex("\\[Source:.*?\\]\\n?"), "")
+        .trim()
 }
 
-// ── Deep Think Block ──
+// ═══════════════════════════════════════════
+// Deep Think Block
+// ═══════════════════════════════════════════
+
 @Composable
 fun DeepThinkBlock(content: String) {
     Box(
@@ -242,21 +367,35 @@ fun DeepThinkBlock(content: String) {
             .clip(RoundedCornerShape(12.dp))
             .background(ThinkBg)
             .border(1.dp, ThinkBorder, RoundedCornerShape(12.dp))
-            .padding(12.dp)
+            .padding(14.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("🧠", fontSize = 16.sp)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Deep Think", color = Color(0xFF9B9BFF), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Deep Think",
+                    color = ThinkText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(content, color = Color(0xFFC0C0E0), fontSize = 13.sp, lineHeight = 20.sp, fontFamily = FontFamily.Monospace)
+            Text(
+                text = content,
+                color = ThinkContent,
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
 
-// ── Code block rendering ──
+// ═══════════════════════════════════════════
+// Code & Text Rendering
+// ═══════════════════════════════════════════
+
 @Composable
 fun RenderWithCodeBlocks(text: String) {
     val parts = text.split("```")
@@ -273,51 +412,85 @@ fun RenderWithCodeBlocks(text: String) {
 fun FormattedText(text: String) {
     val formattedText = buildAnnotatedString {
         var remaining = text.trim()
+
         while (remaining.isNotEmpty()) {
             when {
                 remaining.startsWith("`") -> {
                     val end = remaining.indexOf("`", 1)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0xFF2A2A40), color = Color(0xFFE0A0FF), fontSize = 13.sp)) {
+                        withStyle(SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = InlineCodeBg,
+                            color = InlineCodeColor,
+                            fontSize = 13.sp
+                        )) {
                             append(remaining.substring(1, end))
                         }
                         remaining = remaining.substring(end + 1)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("**") -> {
                     val end = remaining.indexOf("**", 2)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = ZarpTextPrimary)) { append(remaining.substring(2, end)) }
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = ZarpTextPrimary)) {
+                            append(remaining.substring(2, end))
+                        }
                         remaining = remaining.substring(end + 2)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("*") -> {
                     val end = remaining.indexOf("*", 1)
                     if (end != -1) {
-                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = ZarpTextPrimary)) { append(remaining.substring(1, end)) }
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = ZarpTextPrimary)) {
+                            append(remaining.substring(1, end))
+                        }
                         remaining = remaining.substring(end + 1)
-                    } else { append(remaining[0]); remaining = remaining.substring(1) }
+                    } else {
+                        append(remaining[0])
+                        remaining = remaining.substring(1)
+                    }
                 }
                 remaining.startsWith("|") -> {
                     val newline = remaining.indexOf("\n")
                     val line = if (newline != -1) remaining.substring(0, newline) else remaining
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color(0xFFC0C0FF))) { append(line) }
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TableColor)) {
+                        append(line)
+                    }
                     remaining = if (newline != -1) remaining.substring(newline) else ""
                 }
                 remaining.startsWith("• ") || remaining.startsWith("- ") -> {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) { append("  •  ") }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium, color = AccentBlue)) {
+                        append("  •  ")
+                    }
                     remaining = remaining.substring(2)
                 }
                 remaining.first().isDigit() && remaining.contains(". ") && remaining.indexOf(". ") in 1..3 -> {
                     val dotIndex = remaining.indexOf(". ")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AccentBlue)) { append(remaining.substring(0, dotIndex + 2)) }
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = AccentBlue)) {
+                        append(remaining.substring(0, dotIndex + 2))
+                    }
                     remaining = remaining.substring(dotIndex + 2)
                 }
-                else -> { append(remaining[0]); remaining = remaining.substring(1) }
+                else -> {
+                    append(remaining[0])
+                    remaining = remaining.substring(1)
+                }
             }
         }
     }
-    Text(formattedText, fontSize = 15.sp, lineHeight = 24.sp, color = ZarpTextPrimary)
+
+    Text(
+        text = formattedText,
+        fontSize = 15.sp,
+        lineHeight = 24.sp,
+        color = ZarpTextPrimary
+    )
 }
 
 @Composable
@@ -325,7 +498,9 @@ fun CodeBlock(code: String) {
     val clipboardManager = LocalClipboardManager.current
     val lines = code.split("\n")
     val lang = lines.firstOrNull()?.trim()?.takeIf { it.length < 20 } ?: "code"
-    val actualCode = if (lines.size > 1 && lines.first().trim().length < 20) lines.drop(1).joinToString("\n").trim() else code.trim()
+    val actualCode = if (lines.size > 1 && lines.first().trim().length < 20)
+        lines.drop(1).joinToString("\n").trim()
+    else code.trim()
 
     Box(
         modifier = Modifier
@@ -336,21 +511,49 @@ fun CodeBlock(code: String) {
             .border(1.dp, ZarpDivider, RoundedCornerShape(12.dp))
     ) {
         Column {
+            // Code header
             Row(
-                modifier = Modifier.fillMaxWidth().background(CodeHeaderBg).padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(CodeHeaderBg)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("📄", fontSize = 12.sp)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(lang, color = ZarpTextSecondary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = lang,
+                        color = ZarpTextSecondary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
-                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actualCode)) }, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Outlined.ContentCopy, "Copy", tint = ZarpTextSecondary, modifier = Modifier.size(14.dp))
+                IconButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(actualCode)) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = "Copy code",
+                        tint = ZarpTextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
+
+            // Code content
             SelectionContainer {
-                Text(actualCode, color = Color(0xFFD4D4FF), fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(12.dp))
+                Text(
+                    text = actualCode,
+                    color = Color(0xFFD4D4FF),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.padding(12.dp)
+                )
             }
         }
     }

@@ -31,7 +31,12 @@ fun MessageList(
     isAiThinking: Boolean,
     modifier: Modifier = Modifier,
     speakingMessageId: String? = null,
-    onSpeakMessage: ((String, String) -> Unit)? = null
+    onSpeakMessage: ((String, String) -> Unit)? = null,
+    likedMessages: Set<String> = emptySet(),
+    dislikedMessages: Set<String> = emptySet(),
+    onLikeMessage: ((String) -> Unit)? = null,
+    onDislikeMessage: ((String) -> Unit)? = null,
+    onRegenerate: (() -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
 
@@ -58,11 +63,23 @@ fun MessageList(
                 if (message.isUser) {
                     UserMessageBubble(message = message)
                 } else {
+                    val isLastAi = messages.lastOrNull { !it.isUser }?.id == message.id
                     AiMessageContent(
                         message = message,
                         isSpeaking = speakingMessageId == message.id,
+                        isLiked = message.id in likedMessages,
+                        isDisliked = message.id in dislikedMessages,
                         onSpeak = if (onSpeakMessage != null) {
                             { onSpeakMessage(message.id, message.text) }
+                        } else null,
+                        onLike = if (onLikeMessage != null) {
+                            { onLikeMessage(message.id) }
+                        } else null,
+                        onDislike = if (onDislikeMessage != null) {
+                            { onDislikeMessage(message.id) }
+                        } else null,
+                        onRegenerate = if (isLastAi && onRegenerate != null) {
+                            { onRegenerate() }
                         } else null
                     )
                 }
@@ -94,18 +111,9 @@ fun EmptyChatState(modifier: Modifier = Modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             EmptyChatIcon()
             Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                "Zarp",
-                color = ZarpTextPrimary,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text("Zarp", color = ZarpTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "How can I help you today?",
-                color = ZarpTextTertiary,
-                fontSize = 14.sp
-            )
+            Text("How can I help you today?", color = ZarpTextTertiary, fontSize = 14.sp)
         }
     }
 }

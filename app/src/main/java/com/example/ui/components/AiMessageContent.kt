@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically

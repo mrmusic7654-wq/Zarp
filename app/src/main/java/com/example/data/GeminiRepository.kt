@@ -18,7 +18,6 @@ class GeminiRepository(private val context: Context) {
         private const val TAG = "GeminiRepo"
         private const val MAX_OUTPUT_TOKENS = 8192
         private const val IMAGE_MAX_DIMENSION = 2048
-        private const val MAX_FILE_CHARS = 4000
     }
 
     private val fullContextCount = 5
@@ -59,7 +58,10 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 - Be direct first, elaborate second. Answer the question, then explain.
 - Match your tone to the user's vibe — casual or professional.
 - Never sound robotic. Write like a brilliant friend.
-- When given web search results, cite sources using [Source: title](url) format.
+- When given web search results, YOU MUST cite sources EXACTLY as:
+  [Source: Page Title](https://full-url.com)
+  Place each source on its own line at the very end of your response.
+- NEVER use inline (url) format. Only [Source: title](url) format.
 
 📝 FORMATTING:
 - Use **bold** for key terms only — 2-3 times max per response.
@@ -71,11 +73,6 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 💻 CODE:
 - Always wrap code in ```language ... ```
 - Explain what the code does BEFORE showing it.
-- For inline code references, use single backticks: `functionName()`
-
-📊 DATA:
-- Use markdown tables when comparing things.
-- Add a blank line before and after tables.
 
 🧠 DEEP REASONING:
 - For complex problems, show your work:
@@ -123,10 +120,8 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 
         val rest = history.filter { it !in recent && it !in olderRelevant }
         if (rest.isNotEmpty()) {
-            val userTopics = rest.filter { it.isUser }
-                .map { it.text.take(60) }.distinct().joinToString("; ")
-            val aiTopics = rest.filter { !it.isUser }
-                .map { it.text.take(60) }.distinct().joinToString("; ")
+            val userTopics = rest.filter { it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
+            val aiTopics = rest.filter { !it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
             if (userTopics.isNotBlank()) sb.appendLine("📋 User asked: $userTopics")
             if (aiTopics.isNotBlank()) sb.appendLine("💬 Zarp answered: $aiTopics")
         }
@@ -167,7 +162,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 
         try {
             val contextBlock = buildContext(chatHistory, prompt)
-            Log.d(TAG, "📤 $modelName | ${chatHistory.size} msg history | ${prompt.take(60)}...")
+            Log.d(TAG, "📤 $modelName | ${chatHistory.size} msg history")
 
             val response = model.generateContent(content {
                 if (contextBlock.isNotBlank()) text(contextBlock)
@@ -183,7 +178,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
             Log.d(TAG, "📥 Response: ${rawText.take(100)}...")
             rawText
         } catch (e: Exception) {
-            Log.e(TAG, "❌ $modelName failed: ${e.localizedMessage}", e)
+            Log.e(TAG, "❌ $modelName failed", e)
             handleApiError(e, modelName)
         }
     }
@@ -202,7 +197,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
             ?: return@withContext "⚠️ **API key not set.**"
 
         try {
-            Log.d(TAG, "🔍 Search mode: fetching web data for: ${prompt.take(60)}...")
+            Log.d(TAG, "🔍 Fetching web data for: ${prompt.take(60)}...")
 
             val searchContext = WebSearchManager.searchForContext(
                 query = prompt,
@@ -216,11 +211,13 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
                     appendLine(searchContext)
                     appendLine()
                     appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine("📋 INSTRUCTIONS:")
-                    appendLine("- Use the search results above to answer accurately")
-                    appendLine("- Cite sources using [Source: title](url) format")
-                    appendLine("- If results are insufficient, use your own knowledge")
-                    appendLine("- Be concise but thorough")
+                    appendLine("📋 CRITICAL SOURCE CITATION RULES:")
+                    appendLine("1. YOU MUST cite EVERY source using EXACTLY this format:")
+                    appendLine("   [Source: Page Title](https://full-url.com)")
+                    appendLine("2. Put each source on its OWN LINE at the END of your response")
+                    appendLine("3. Example: [Source: Red Panda Facts](https://animals.sandiegozoo.org/red-panda)")
+                    appendLine("4. NEVER use inline (url) format — it breaks the app")
+                    appendLine("5. If no search results are relevant, say so clearly")
                     appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                     appendLine()
                 }
@@ -262,7 +259,6 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 
             val inputStream = context.contentResolver.openInputStream(imageUri)
             if (inputStream == null) {
-                Log.e(TAG, "Cannot open image stream")
                 return@withContext "❌ Cannot read the image file."
             }
 
@@ -290,7 +286,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
                     if (msg.isUser) text("👤 ${msg.text}") else text("🤖 ${msg.text}")
                 }
                 image(processedBitmap)
-                text(prompt.ifBlank { "Describe this image in detail. What do you see?" })
+                text(prompt.ifBlank { "Describe this image in detail." })
             })
 
             response.text ?: "⚠️ I couldn't analyze the image."

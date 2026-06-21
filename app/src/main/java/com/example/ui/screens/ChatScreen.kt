@@ -50,6 +50,7 @@ fun ChatScreen(
     val drawerWidth = configuration.screenWidthDp.dp * 0.85f
     val snackbarHostState = remember { SnackbarHostState() }
     var showModelSelector by remember { mutableStateOf(false) }
+    var agentPanelExpanded by remember { mutableStateOf(true) }
     val context = LocalContext.current
 
     val voiceLauncher = rememberLauncherForActivityResult(
@@ -76,7 +77,6 @@ fun ChatScreen(
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
-    // ── Sheets & Dialogs ──
     if (uiState.showAttachmentSheet) {
         AttachmentSheet(
             onDismiss = { viewModel.dismissAttachmentSheet() },
@@ -128,11 +128,16 @@ fun ChatScreen(
         drawerContent = {
             Box(modifier = Modifier.width(drawerWidth)) {
                 SidebarDrawer(
-                    conversations = uiState.conversations, currentConversationId = uiState.currentConversationId,
+                    conversations = uiState.conversations,
+                    currentConversationId = uiState.currentConversationId,
                     onNewChat = { viewModel.onNewChat(); scope.launch { drawerState.close() } },
                     onSelectConversation = { viewModel.onSelectConversation(it); scope.launch { drawerState.close() } },
                     onDeleteConversation = { viewModel.onDeleteConversation(it) },
-                    onSettingsTap = { scope.launch { drawerState.close() }; onNavigateToSettings() }
+                    onSettingsTap = { scope.launch { drawerState.close() }; onNavigateToSettings() },
+                    // ── Task History ──
+                    tasks = uiState.tasks,
+                    onSelectTask = { viewModel.onSelectTask(it); scope.launch { drawerState.close() } },
+                    onDeleteTask = { viewModel.onDeleteTask(it) }
                 )
             }
         }
@@ -186,14 +191,39 @@ fun ChatScreen(
         ) { paddingValues ->
             Column(Modifier.fillMaxSize().padding(paddingValues)) {
 
-                // ── Agent Progress Panel ──
+                // ── Agent Progress Panel (collapsible) ──
                 AnimatedVisibility(
                     visible = uiState.isAgentMode && uiState.agentProgress != null,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     uiState.agentProgress?.let { progress ->
-                        AgentProgressPanel(progress = progress, agentResult = uiState.agentTaskResult)
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(6.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1F0D)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable { agentPanelExpanded = !agentPanelExpanded },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("🤖 Agent", color = Color(0xFF00E676), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Text("${(progress.percentage * 100).toInt()}%", color = Color(0xFF00E676), fontSize = 11.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(if (agentPanelExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle", tint = Color(0xFF00E676), modifier = Modifier.size(16.dp))
+                                }
+                                AnimatedVisibility(visible = agentPanelExpanded) {
+                                    Column {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        LinearProgressIndicator(progress = { progress.percentage }, modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)), color = Color(0xFF00E676), trackColor = Color(0xFF1A3A1A))
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(progress.stepDescription, color = Color(0xFFC8E6C9), fontSize = 12.sp)
+                                        Text(progress.message, color = Color(0xFF81C784), fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -213,102 +243,17 @@ fun ChatScreen(
 
                 // ── Input Bar ──
                 InputBar(
-                    inputText = uiState.inputText,
-                    onInputChanged = { viewModel.onInputChanged(it) },
-                    onSend = { viewModel.onSend() },
-                    onMicTap = { viewModel.onStartVoiceInput(voiceLauncher) },
-                    onAttachmentTap = { viewModel.onAttachmentTap() },
-                    isListening = uiState.isListening,
-                    isThinking = uiState.isAiThinking && !uiState.isPaused,
-                    isPaused = uiState.isPaused,
-                    onPause = { viewModel.onPauseGeneration() },
-                    onResume = { viewModel.onResumeGeneration() },
-                    attachedImageUris = uiState.selectedImageUris,
-                    attachedFileNames = uiState.selectedFileNames,
-                    attachedFileTypes = uiState.selectedFileTypes,
-                    onRemoveAttachment = { index -> viewModel.removeSingleAttachment(index) },
-                    isTranslateMode = uiState.isTranslateMode,
-                    onToggleTranslateMode = { viewModel.onToggleTranslateMode() },
-                    isSearchMode = uiState.isSearchMode,
-                    onToggleSearchMode = { viewModel.onToggleSearchMode() },
-                    isAgentMode = uiState.isAgentMode,
-                    onToggleAgentMode = { viewModel.onToggleAgentMode() }
+                    inputText = uiState.inputText, onInputChanged = { viewModel.onInputChanged(it) },
+                    onSend = { viewModel.onSend() }, onMicTap = { viewModel.onStartVoiceInput(voiceLauncher) },
+                    onAttachmentTap = { viewModel.onAttachmentTap() }, isListening = uiState.isListening,
+                    isThinking = uiState.isAiThinking && !uiState.isPaused, isPaused = uiState.isPaused,
+                    onPause = { viewModel.onPauseGeneration() }, onResume = { viewModel.onResumeGeneration() },
+                    attachedImageUris = uiState.selectedImageUris, attachedFileNames = uiState.selectedFileNames,
+                    attachedFileTypes = uiState.selectedFileTypes, onRemoveAttachment = { index -> viewModel.removeSingleAttachment(index) },
+                    isTranslateMode = uiState.isTranslateMode, onToggleTranslateMode = { viewModel.onToggleTranslateMode() },
+                    isSearchMode = uiState.isSearchMode, onToggleSearchMode = { viewModel.onToggleSearchMode() },
+                    isAgentMode = uiState.isAgentMode, onToggleAgentMode = { viewModel.onToggleAgentMode() }
                 )
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════
-// Agent Progress Panel
-// ═══════════════════════════════════════════
-
-@Composable
-private fun AgentProgressPanel(
-    progress: AgentLoopManager.AgentProgress,
-    agentResult: AgentLoopManager.AgentResult?
-) {
-    val statusColor = when (progress.status) {
-        AgentLoopManager.AgentStatus.COMPLETED -> Color(0xFF00E676)
-        AgentLoopManager.AgentStatus.FAILED -> Color(0xFFFF5252)
-        else -> ZarpAccent
-    }
-
-    val statusEmoji = when (progress.status) {
-        AgentLoopManager.AgentStatus.PLANNING -> "🧠"
-        AgentLoopManager.AgentStatus.EXECUTING -> "⚡"
-        AgentLoopManager.AgentStatus.REVIEWING -> "🔍"
-        AgentLoopManager.AgentStatus.FIXING -> "🔧"
-        AgentLoopManager.AgentStatus.PUSHING -> "📤"
-        AgentLoopManager.AgentStatus.COMPLETED -> "✅"
-        AgentLoopManager.AgentStatus.FAILED -> "❌"
-        else -> "🤖"
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF0D1F0D))
-            .padding(12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(statusEmoji, fontSize = 18.sp)
-            Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = when (progress.status) {
-                        AgentLoopManager.AgentStatus.PLANNING -> "Planning task..."
-                        AgentLoopManager.AgentStatus.EXECUTING -> "Executing step ${progress.currentStep}/${progress.totalSteps}"
-                        AgentLoopManager.AgentStatus.REVIEWING -> "Reviewing code..."
-                        AgentLoopManager.AgentStatus.FIXING -> "Fixing issues..."
-                        AgentLoopManager.AgentStatus.PUSHING -> "Pushing to GitHub..."
-                        AgentLoopManager.AgentStatus.COMPLETED -> "Task completed!"
-                        AgentLoopManager.AgentStatus.FAILED -> "Task failed"
-                        else -> progress.stepDescription
-                    },
-                    color = statusColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
-                )
-                Text(progress.message, color = Color(0xFF81C784), fontSize = 11.sp)
-            }
-            Text("${(progress.percentage * 100).toInt()}%", color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
-
-        if (progress.status != AgentLoopManager.AgentStatus.COMPLETED && progress.status != AgentLoopManager.AgentStatus.FAILED) {
-            Spacer(modifier = Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { progress.percentage },
-                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
-                color = statusColor, trackColor = Color(0xFF1A3A1A)
-            )
-        }
-
-        // Show result summary when completed
-        if (progress.status == AgentLoopManager.AgentStatus.COMPLETED && agentResult != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(agentResult.summary, color = Color(0xFFC8E6C9), fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            if (agentResult.repoUrl != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("🔗 ${agentResult.repoUrl}", color = ZarpAccent, fontSize = 10.sp)
             }
         }
     }

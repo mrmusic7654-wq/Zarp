@@ -40,6 +40,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val isSpeaking: Boolean = false,
         val speakingMessageId: String? = null,
         val isTranslateMode: Boolean = false,
+        val isSearchMode: Boolean = false,
         val translateLanguage: String = "English",
         val isTranslating: Boolean = false,
         val translateResult: String? = null,
@@ -118,11 +119,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(isTranslateMode = !_uiState.value.isTranslateMode)
     }
 
+    fun onToggleSearchMode() {
+        _uiState.value = _uiState.value.copy(isSearchMode = !_uiState.value.isSearchMode)
+    }
+
     fun onSend() {
         var currentText = _uiState.value.inputText.ifBlank { lastUserPrompt }
         val imageUris = _uiState.value.selectedImageUris.ifEmpty { lastImageUris }
         var conversationId: String? = _uiState.value.currentConversationId
         val isTranslateMode = _uiState.value.isTranslateMode
+        val isSearchMode = _uiState.value.isSearchMode
         val isRegenerate = _uiState.value.inputText.isBlank() && lastUserPrompt.isNotBlank()
 
         if (currentText.isBlank() && imageUris.isEmpty()) return
@@ -205,7 +211,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val fullPrompt = if (fileContent.isNotBlank()) {
                         "$currentText\n\n[File content]:\n$fileContent"
                     } else currentText
-                    geminiRepository.generateResponse(fullPrompt, modelName, history, _uiState.value.customStyle)
+                    geminiRepository.generateResponse(fullPrompt, modelName, history, _uiState.value.customStyle, isSearchMode)
                 }
 
                 if (isTranslateMode) {
@@ -336,10 +342,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val msgs = chatRepository.getMessagesForConversationOnce(id)
-                Log.d("ChatVM", "📂 Loaded ${msgs.size} messages for $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
                 msgs.findLast { it.isUser }?.let { lastUserPrompt = it.text }
-            } catch (e: Exception) { Log.e("ChatVM", "Failed to load conversation $id", e) }
+            } catch (e: Exception) { Log.e("ChatVM", "Failed to load", e) }
         }
     }
 

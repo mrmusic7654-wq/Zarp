@@ -243,7 +243,7 @@ Your goal: Every response should feel like it was hand-crafted by a thoughtful, 
     }
 
     // ═══════════════════════════════════════════
-    // Search-Powered Generation
+    // Search-Powered Generation (ALL MODELS)
     // ═══════════════════════════════════════════
 
     private suspend fun generateWithSearch(
@@ -270,13 +270,24 @@ Your goal: Every response should feel like it was hand-crafted by a thoughtful, 
                     appendLine(searchContext)
                     appendLine()
                     appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine("📋 CRITICAL SOURCE CITATION RULES:")
-                    appendLine("1. YOU MUST cite EVERY source using EXACTLY this format:")
-                    appendLine("   [Source: Page Title](https://full-url.com)")
-                    appendLine("2. Put each source on its OWN LINE at the END of your response")
-                    appendLine("3. Example: [Source: Red Panda Facts](https://animals.sandiegozoo.org/red-panda)")
-                    appendLine("4. NEVER use inline (url) format — it breaks the app")
-                    appendLine("5. If no search results are relevant, say so clearly")
+                    appendLine("🚨 MANDATORY SOURCE CITATION — DO NOT SKIP 🚨")
+                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    appendLine()
+                    appendLine("You MUST end your response with EVERY source listed in EXACTLY this format:")
+                    appendLine()
+                    appendLine("[Source: Exact Page Title](https://exact-url.com)")
+                    appendLine()
+                    appendLine("Example:")
+                    appendLine("[Source: Red Panda Facts](https://animals.sandiegozoo.org/red-panda)")
+                    appendLine("[Source: WWF Red Panda](https://worldwildlife.org/species/red-panda)")
+                    appendLine()
+                    appendLine("⚠️ CRITICAL RULES:")
+                    appendLine("- Include EVERY source from the search results above")
+                    appendLine("- Each source on its OWN line at the VERY END of your response")
+                    appendLine("- Use EXACTLY [Source: title](url) format — nothing else")
+                    appendLine("- NEVER use inline (url) — the app will break")
+                    appendLine("- This is NOT optional — the app requires this format")
+                    appendLine()
                     appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                     appendLine()
                 }

@@ -1,6 +1,8 @@
 package com.example.data.search
 
+import android.content.Context
 import android.util.Log
+import com.example.data.KeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -12,9 +14,6 @@ import java.util.concurrent.TimeUnit
 object WebSearchManager {
 
     private const val TAG = "WebSearchManager"
-    
-    // 🔁 Replace with your HF Space URL after deployment
-    private const val HF_SPACE_URL = "https://yourname-zarp-search.hf.space/search"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -64,20 +63,28 @@ object WebSearchManager {
     )
 
     /**
-     * Execute a web search with optional full content fetching.
+     * Execute a web search via HF Space.
+     * Reads the Space URL from KeyManager — no hardcoded URLs.
      */
     suspend fun search(
         query: String,
+        context: Context,
         fetchContent: Boolean = false
     ): SearchResponse = withContext(Dispatchers.IO) {
+        val spaceUrl = KeyManager.getHFSpaceUrl(context)
+        if (spaceUrl.isBlank()) {
+            Log.w(TAG, "HF Space URL not configured")
+            return@withContext SearchResponse(query = query)
+        }
+
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "$HF_SPACE_URL?q=$encoded&fetch=$fetchContent"
+            val fullUrl = "$spaceUrl?q=$encoded&fetch=$fetchContent"
 
-            Log.d(TAG, "🔍 Searching: $query (fetch=$fetchContent)")
+            Log.d(TAG, "🔍 Searching via HF Space: ${query.take(60)}...")
 
             val request = Request.Builder()
-                .url(url)
+                .url(fullUrl)
                 .header("User-Agent", "ZarpAI/2.0")
                 .get()
                 .build()
@@ -98,13 +105,21 @@ object WebSearchManager {
     }
 
     /**
-     * Parse JSON response from HF Space.
+     * Shortcut: returns only the formatted context string for Gemini.
      */
+    suspend fun searchForContext(
+        query: String,
+        context: Context,
+        fetchContent: Boolean = false
+    ): String {
+        return search(query, context, fetchContent).formattedContext
+    }
+
     private fun parseResponse(query: String, json: String): SearchResponse {
         return try {
             val obj = JSONObject(json)
 
-            // Parse results
+            // Results
             val resultsArr = obj.optJSONArray("results") ?: org.json.JSONArray()
             val results = (0 until resultsArr.length()).map { i ->
                 val item = resultsArr.getJSONObject(i)
@@ -117,7 +132,7 @@ object WebSearchManager {
                 )
             }
 
-            // Parse video
+            // Video
             val videoObj = obj.optJSONObject("video")
             val video = if (videoObj != null) {
                 YouTubeInfo(
@@ -129,7 +144,7 @@ object WebSearchManager {
                 )
             } else null
 
-            // Parse content
+            // Content
             val contentArr = obj.optJSONArray("content") ?: org.json.JSONArray()
             val content = (0 until contentArr.length()).map { i ->
                 val item = contentArr.getJSONObject(i)
@@ -141,15 +156,13 @@ object WebSearchManager {
                 )
             }
 
-            // Parse stats
+            // Stats
             val statsObj = obj.optJSONObject("stats")
             val stats = if (statsObj != null) {
                 val enginesMap = mutableMapOf<String, Int>()
                 val enginesObj = statsObj.optJSONObject("engines_searched")
                 if (enginesObj != null) {
-                    enginesObj.keys().forEach { key ->
-                        enginesMap[key] = enginesObj.optInt(key, 0)
-                    }
+                    enginesObj.keys().forEach { key -> enginesMap[key] = enginesObj.optInt(key, 0) }
                 }
                 SearchStats(
                     totalFound = statsObj.optInt("total_found", 0),
@@ -160,48 +173,37 @@ object WebSearchManager {
                 )
             } else SearchStats()
 
-            // Build formatted context for Gemini
+            // Formatted context
             val formattedContext = buildString {
-                appendLine("🌐 Web Search Results for: \"$query\"")
+                appendLine("🌐 Web Search: \"$query\"")
                 appendLine()
 
                 if (results.isNotEmpty()) {
                     results.forEachIndexed { i, r ->
                         appendLine("[Source ${i + 1}: ${r.title}](${r.url})")
-                        if (r.snippet.isNotBlank()) {
-                            appendLine("   ${r.snippet.take(200)}")
-                        }
+                        if (r.snippet.isNotBlank()) appendLine("   ${r.snippet.take(200)}")
                         appendLine()
                     }
                 }
-
                 if (video != null) {
-                    appendLine("🎬 YouTube Video Found:")
-                    appendLine("   Title: ${video.title}")
-                    appendLine("   Channel: ${video.author}")
-                    if (video.description.isNotBlank()) {
-                        appendLine("   Description: ${video.description.take(500)}")
-                    }
+                    appendLine("🎬 YouTube: ${video.title} by ${video.author}")
+                    if (video.description.isNotBlank()) appendLine("   ${video.description.take(500)}")
                     appendLine()
                 }
-
                 if (content.isNotEmpty()) {
-                    appendLine("📄 Full Page Content:")
+                    appendLine("📄 Full Content:")
                     content.forEach { c ->
                         appendLine("── ${c.title.take(80)} ──")
                         appendLine(c.text.take(2000))
                         appendLine()
                     }
                 }
-
                 if (stats.enginesSearched.isNotEmpty()) {
-                    appendLine("⚡ Search Stats:")
-                    appendLine("   ${stats.enginesSearched.size} engines searched in ${stats.timeSeconds}s")
-                    appendLine("   ${stats.totalFound} results → ${stats.afterDedup} after dedup")
+                    appendLine("⚡ ${stats.enginesSearched.size} engines | ${stats.totalFound} results | ${stats.timeSeconds}s")
                 }
             }
 
-            Log.d(TAG, "✅ Search complete: ${results.size} results, ${content.size} pages fetched")
+            Log.d(TAG, "✅ ${results.size} results, ${content.size} pages, ${stats.enginesSearched.size} engines")
 
             SearchResponse(
                 query = query,
@@ -212,15 +214,8 @@ object WebSearchManager {
                 formattedContext = formattedContext.trim()
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse response", e)
+            Log.e(TAG, "Parse failed", e)
             SearchResponse(query = query)
         }
-    }
-
-    /**
-     * Extract only the formatted context string (quick helper).
-     */
-    suspend fun searchForContext(query: String, fetchContent: Boolean = false): String {
-        return search(query, fetchContent).formattedContext
     }
 }

@@ -53,7 +53,9 @@ fun InputBar(
     isTranslateMode: Boolean = false,
     onToggleTranslateMode: () -> Unit = {},
     isSearchMode: Boolean = false,
-    onToggleSearchMode: () -> Unit = {}
+    onToggleSearchMode: () -> Unit = {},
+    isAgentMode: Boolean = false,
+    onToggleAgentMode: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -73,7 +75,6 @@ fun InputBar(
                 attachedImageUris.forEachIndexed { index, uri ->
                     val fileType = attachedFileTypes.getOrElse(index) { "📎" }
                     val fileName = attachedFileNames.getOrElse(index) { "File" }
-
                     Box {
                         Row(
                             modifier = Modifier
@@ -85,20 +86,10 @@ fun InputBar(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (fileName.length > 15) fileName.take(15) + "..." else fileName,
-                                color = ZarpTextPrimary,
-                                fontSize = 12.sp,
-                                maxLines = 1
+                                color = ZarpTextPrimary, fontSize = 12.sp, maxLines = 1
                             )
-                            IconButton(
-                                onClick = { onRemoveAttachment(index) },
-                                modifier = Modifier.size(16.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    "Remove",
-                                    tint = ZarpTextTertiary,
-                                    modifier = Modifier.size(12.dp)
-                                )
+                            IconButton(onClick = { onRemoveAttachment(index) }, modifier = Modifier.size(16.dp)) {
+                                Icon(Icons.Default.Close, "Remove", tint = ZarpTextTertiary, modifier = Modifier.size(12.dp))
                             }
                         }
                     }
@@ -120,80 +111,49 @@ fun InputBar(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Attach button
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .clickable { onAttachmentTap() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.AttachFile,
-                    "Attach",
-                    tint = ZarpTextTertiary,
-                    modifier = Modifier.size(22.dp)
-                )
+            // Attach
+            Box(Modifier.size(34.dp).clip(CircleShape).clickable { onAttachmentTap() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.AttachFile, "Attach", tint = ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
-            // Search toggle 🌐
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable { onToggleSearchMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.TravelExplore,
-                    "Search web",
-                    tint = if (isSearchMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            // Search 🌐
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable { onToggleSearchMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.TravelExplore, "Search", tint = if (isSearchMode) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp))
             }
 
-            // Translate toggle 🌍
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .clickable { onToggleTranslateMode() },
-                contentAlignment = Alignment.Center
-            ) {
+            // Translate 🌍
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable { onToggleTranslateMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Translate, "Translate", tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp))
+            }
+
+            // Agent 🤖
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable { onToggleAgentMode() }, contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Rounded.Translate,
-                    "Translate",
-                    tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
+                    Icons.Default.SmartToy,
+                    "Agent",
+                    tint = if (isAgentMode) Color(0xFF00E676) else ZarpTextTertiary,
+                    modifier = Modifier.size(18.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(2.dp))
 
             // Text field
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(vertical = 12.dp)
-            ) {
+            Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
                 val placeholder = when {
                     isListening -> "Listening..."
+                    isAgentMode -> "Agent mode: describe your task..."
                     isSearchMode && isTranslateMode -> "Search + Translate..."
                     isSearchMode -> "Search the web..."
                     isTranslateMode -> "Type in any language..."
                     else -> "Message Zarp..."
                 }
-
-                if (inputText.isEmpty()) {
-                    Text(placeholder, color = ZarpTextTertiary, fontSize = 15.sp)
-                }
+                if (inputText.isEmpty()) Text(placeholder, color = ZarpTextTertiary, fontSize = 14.sp)
                 if (!isListening) {
                     BasicTextField(
-                        value = inputText,
-                        onValueChange = onInputChanged,
-                        textStyle = TextStyle(color = ZarpTextPrimary, fontSize = 15.sp),
-                        cursorBrush = SolidColor(ZarpAccent),
-                        maxLines = 5,
+                        value = inputText, onValueChange = onInputChanged,
+                        textStyle = TextStyle(color = ZarpTextPrimary, fontSize = 14.sp),
+                        cursorBrush = SolidColor(ZarpAccent), maxLines = 5,
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
@@ -202,7 +162,7 @@ fun InputBar(
 
             Spacer(modifier = Modifier.width(2.dp))
 
-            // Dynamic action button
+            // Action button
             Crossfade(
                 targetState = when {
                     isThinking -> "pause"
@@ -210,56 +170,20 @@ fun InputBar(
                     inputText.isNotBlank() || attachedImageUris.isNotEmpty() -> "send"
                     else -> "mic"
                 },
-                animationSpec = tween(200),
-                label = "action_button"
+                animationSpec = tween(200), label = "action"
             ) { state ->
                 when (state) {
-                    "pause" -> {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFFC107))
-                                .clickable { onPause() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
+                    "pause" -> Box(Modifier.size(36.dp).clip(CircleShape).background(Color(0xFFFFC107)).clickable { onPause() }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Pause, "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
-                    "resume" -> {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(ZarpAccent)
-                                .clickable { onResume() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.PlayArrow, "Resume", tint = ZarpMainBg, modifier = Modifier.size(20.dp))
-                        }
+                    "resume" -> Box(Modifier.size(36.dp).clip(CircleShape).background(ZarpAccent).clickable { onResume() }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.PlayArrow, "Resume", tint = ZarpMainBg, modifier = Modifier.size(20.dp))
                     }
-                    "send" -> {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(ZarpAccent)
-                                .clickable { onSend() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.ArrowUpward, "Send", tint = ZarpMainBg, modifier = Modifier.size(18.dp))
-                        }
+                    "send" -> Box(Modifier.size(36.dp).clip(CircleShape).background(if (isAgentMode) Color(0xFF00E676) else ZarpAccent).clickable { onSend() }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.ArrowUpward, "Send", tint = ZarpMainBg, modifier = Modifier.size(18.dp))
                     }
-                    else -> {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .clickable { onMicTap() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Mic, "Microphone", tint = ZarpTextTertiary, modifier = Modifier.size(22.dp))
-                        }
+                    else -> Box(Modifier.size(34.dp).clip(CircleShape).clickable { onMicTap() }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Mic, "Mic", tint = ZarpTextTertiary, modifier = Modifier.size(20.dp))
                     }
                 }
             }

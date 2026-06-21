@@ -61,11 +61,6 @@ class GitHubAgent(private val githubToken: String) {
         val state: String
     )
 
-    data class SearchResult(
-        val totalCount: Int,
-        val items: List<RepoInfo>
-    )
-
     // ═══════════════════════════════════════════
     // Create Repository
     // ═══════════════════════════════════════════
@@ -83,18 +78,17 @@ class GitHubAgent(private val githubToken: String) {
                 put("private", isPrivate)
                 put("auto_init", autoInit)
             }
-
             val request = buildRequest("POST", "$API_BASE/user/repos", json.toString())
             val response = client.newCall(request).execute()
             val body = response.body?.string() ?: return@withContext null
 
             if (!response.isSuccessful) {
-                Log.e(TAG, "Create repo failed: ${response.code} $body")
+                Log.e(TAG, "❌ Create repo failed: ${response.code} — $body")
                 return@withContext null
             }
 
             val repo = JSONObject(body)
-            RepoInfo(
+            val result = RepoInfo(
                 name = repo.getString("name"),
                 fullName = repo.getString("full_name"),
                 url = repo.getString("url"),
@@ -102,8 +96,10 @@ class GitHubAgent(private val githubToken: String) {
                 htmlUrl = repo.getString("html_url"),
                 defaultBranch = repo.optString("default_branch", DEFAULT_BRANCH)
             )
+            Log.d(TAG, "✅ Repo created: ${result.htmlUrl}")
+            result
         } catch (e: Exception) {
-            Log.e(TAG, "Create repo error", e)
+            Log.e(TAG, "❌ Create repo error", e)
             null
         }
     }
@@ -124,30 +120,39 @@ class GitHubAgent(private val githubToken: String) {
             val updated = mutableListOf<String>()
 
             for (file in files) {
-                val result = pushSingleFile(owner, repo, file, commitMessage, branch)
-                if (result.success) {
-                    if (result.sha != null) updated.add(file.path)
-                    else created.add(file.path)
+                Log.d(TAG, "📄 Pushing: ${file.path}")
+                val pushedFile = pushSingleFile(owner, repo, file, commitMessage, branch)
+
+                if (pushedFile.sha != null) {
+                    if (file.sha == null) {
+                        created.add(file.path)
+                        Log.d(TAG, "  ✅ Created: ${file.path}")
+                    } else {
+                        updated.add(file.path)
+                        Log.d(TAG, "  ✅ Updated: ${file.path}")
+                    }
+                } else {
+                    Log.w(TAG, "  ⚠️ Failed to push: ${file.path}")
                 }
             }
 
             val repoInfo = getRepo(owner, repo)
 
             PushResult(
-                success = true,
+                success = created.isNotEmpty() || updated.isNotEmpty(),
                 repo = repoInfo,
                 filesCreated = created,
                 filesUpdated = updated,
                 commitUrl = repoInfo?.htmlUrl?.let { "$it/commit/$branch" }
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Push files error", e)
+            Log.e(TAG, "❌ Push files error", e)
             PushResult(success = false, error = e.localizedMessage)
         }
     }
 
     // ═══════════════════════════════════════════
-    // Push Single File
+    // Push Single File (Create or Update)
     // ═══════════════════════════════════════════
 
     private suspend fun pushSingleFile(
@@ -158,7 +163,6 @@ class GitHubAgent(private val githubToken: String) {
         branch: String
     ): FileInfo = withContext(Dispatchers.IO) {
         try {
-            // Check if file exists
             val existingSha = getFileSha(owner, repo, file.path, branch)
 
             val json = JSONObject().apply {
@@ -183,17 +187,17 @@ class GitHubAgent(private val githubToken: String) {
                     url = content?.optString("html_url")
                 )
             } else {
-                Log.e(TAG, "Push file failed: ${response.code}")
+                Log.e(TAG, "  ❌ Push failed (${response.code}): ${body.take(200)}")
                 file
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Push single file error", e)
+            Log.e(TAG, "  ❌ Push single file error", e)
             file
         }
     }
 
     // ═══════════════════════════════════════════
-    // Get File SHA (for updates)
+    // Get File SHA (check if file exists)
     // ═══════════════════════════════════════════
 
     private suspend fun getFileSha(
@@ -210,7 +214,9 @@ class GitHubAgent(private val githubToken: String) {
 
             if (response.isSuccessful && body != null) {
                 JSONObject(body).optString("sha", null)
-            } else null
+            } else {
+                null
+            }
         } catch (e: Exception) {
             null
         }
@@ -227,7 +233,10 @@ class GitHubAgent(private val githubToken: String) {
             val response = client.newCall(request).execute()
             val body = response.body?.string() ?: return@withContext null
 
-            if (!response.isSuccessful) return@withContext null
+            if (!response.isSuccessful) {
+                Log.w(TAG, "⚠️ Get repo failed: ${response.code}")
+                return@withContext null
+            }
 
             val json = JSONObject(body)
             RepoInfo(
@@ -239,6 +248,7 @@ class GitHubAgent(private val githubToken: String) {
                 defaultBranch = json.optString("default_branch", DEFAULT_BRANCH)
             )
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Get repo error", e)
             null
         }
     }
@@ -268,16 +278,22 @@ class GitHubAgent(private val githubToken: String) {
             val response = client.newCall(request).execute()
             val respBody = response.body?.string() ?: return@withContext null
 
-            if (!response.isSuccessful) return@withContext null
+            if (!response.isSuccessful) {
+                Log.e(TAG, "❌ Create PR failed: ${response.code}")
+                return@withContext null
+            }
 
             val pr = JSONObject(respBody)
-            PRInfo(
+            val result = PRInfo(
                 number = pr.getInt("number"),
                 title = pr.getString("title"),
                 url = pr.getString("html_url"),
                 state = pr.getString("state")
             )
+            Log.d(TAG, "✅ PR created: ${result.url}")
+            result
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Create PR error", e)
             null
         }
     }
@@ -299,7 +315,10 @@ class GitHubAgent(private val githubToken: String) {
             val refResp = client.newCall(refReq).execute()
             val refBody = refResp.body?.string() ?: return@withContext false
 
-            if (!refResp.isSuccessful) return@withContext false
+            if (!refResp.isSuccessful) {
+                Log.e(TAG, "❌ Get base branch failed: ${refResp.code}")
+                return@withContext false
+            }
 
             val baseSha = JSONObject(refBody).getJSONObject("object").getString("sha")
 
@@ -313,8 +332,15 @@ class GitHubAgent(private val githubToken: String) {
             val request = buildRequest("POST", url, json.toString())
             val response = client.newCall(request).execute()
 
-            response.isSuccessful
+            if (response.isSuccessful) {
+                Log.d(TAG, "✅ Branch created: $branchName")
+                true
+            } else {
+                Log.e(TAG, "❌ Create branch failed: ${response.code}")
+                false
+            }
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Create branch error", e)
             false
         }
     }
@@ -330,7 +356,7 @@ class GitHubAgent(private val githubToken: String) {
             val body = response.body?.string() ?: return@withContext emptyList()
 
             val arr = JSONArray(body)
-            (0 until arr.length()).map { i ->
+            val repos = (0 until arr.length()).map { i ->
                 val json = arr.getJSONObject(i)
                 RepoInfo(
                     name = json.getString("name"),
@@ -341,7 +367,10 @@ class GitHubAgent(private val githubToken: String) {
                     defaultBranch = json.optString("default_branch", DEFAULT_BRANCH)
                 )
             }
+            Log.d(TAG, "📋 Listed ${repos.size} repos")
+            repos
         } catch (e: Exception) {
+            Log.e(TAG, "❌ List repos error", e)
             emptyList()
         }
     }
@@ -362,14 +391,19 @@ class GitHubAgent(private val githubToken: String) {
             val response = client.newCall(request).execute()
             val body = response.body?.string() ?: return@withContext null
 
-            if (!response.isSuccessful) return@withContext null
+            if (!response.isSuccessful) {
+                Log.w(TAG, "⚠️ Read file failed: ${response.code}")
+                return@withContext null
+            }
 
             val json = JSONObject(body)
             val encoded = json.optString("content", "")
             if (encoded.isBlank()) return@withContext null
 
-            Base64.getDecoder().decode(encoded.replace("\n", "")).toString(Charsets.UTF_8)
+            val decoded = Base64.getDecoder().decode(encoded.replace("\n", ""))
+            String(decoded, Charsets.UTF_8)
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Read file error", e)
             null
         }
     }
@@ -398,8 +432,15 @@ class GitHubAgent(private val githubToken: String) {
             val request = buildRequest("DELETE", url, json.toString())
             val response = client.newCall(request).execute()
 
-            response.isSuccessful
+            if (response.isSuccessful) {
+                Log.d(TAG, "🗑️ Deleted: $path")
+                true
+            } else {
+                Log.e(TAG, "❌ Delete failed: ${response.code}")
+                false
+            }
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Delete error", e)
             false
         }
     }
@@ -417,23 +458,28 @@ class GitHubAgent(private val githubToken: String) {
     ): PushResult = withContext(Dispatchers.IO) {
         Log.d(TAG, "🚀 Creating project: $repoName with ${files.size} files")
 
-        val repo = createRepo(repoName, description, isPrivate) ?: return@withContext PushResult(
-            success = false, error = "Failed to create repository"
-        )
-
-        Log.d(TAG, "📁 Repo created: ${repo.htmlUrl}")
-
-        val owner = repo.fullName.split("/").first()
-        val repoNameOnly = repo.name
-
-        val result = pushFiles(owner, repoNameOnly, files, "Zarp AI: Initial project setup")
-
-        if (result.success && createPR) {
-            val branchName = "zarp-${System.currentTimeMillis()}"
-            createBranch(owner, repoNameOnly, branchName)
-            createPR(owner, repoNameOnly, "Zarp AI: Generated project", branchName)
+        // Step 1: Create repo
+        val repo = createRepo(repoName, description, isPrivate)
+        if (repo == null) {
+            return@withContext PushResult(success = false, error = "Failed to create repository")
         }
 
+        val owner = repo.fullName.split("/").first()
+        val repoOnly = repo.name
+
+        // Step 2: Push all files
+        val result = pushFiles(owner, repoOnly, files, "Zarp AI: Initial project setup")
+
+        // Step 3: Optionally create PR
+        if (result.success && createPR) {
+            val branchName = "zarp-${System.currentTimeMillis()}"
+            val branchCreated = createBranch(owner, repoOnly, branchName)
+            if (branchCreated) {
+                createPR(owner, repoOnly, "Zarp AI: Generated project", branchName)
+            }
+        }
+
+        Log.d(TAG, if (result.success) "✅ Project created: ${repo.htmlUrl}" else "❌ Project creation failed")
         result
     }
 
@@ -452,7 +498,13 @@ class GitHubAgent(private val githubToken: String) {
             "GET" -> builder.get()
             "POST" -> builder.post(body!!.toRequestBody("application/json".toMediaType()))
             "PUT" -> builder.put(body!!.toRequestBody("application/json".toMediaType()))
-            "DELETE" -> builder.delete(body?.let { it.toRequestBody("application/json".toMediaType()) })
+            "DELETE" -> {
+                if (body != null) {
+                    builder.delete(body.toRequestBody("application/json".toMediaType()))
+                } else {
+                    builder.delete()
+                }
+            }
         }
 
         return builder.build()

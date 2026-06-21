@@ -270,7 +270,10 @@ Return ONLY the JSON array. No other text.
     private suspend fun executePushToGitHub(step: AgentStep, files: List<GitHubAgent.FileInfo>): AgentStep {
         if (files.isEmpty()) return step.copy(status = StepStatus.SKIPPED, output = "No files to push")
         val repoName = "zarp-generated-${System.currentTimeMillis()}"
-        val owner = "user" // TODO: get from authenticated user
+        val owner = gitHubAgent.getAuthenticatedUsername() ?: return step.copy(
+    status = StepStatus.FAILED, 
+    output = "Could not get GitHub username. Check your token."
+      )
         val result = gitHubAgent.pushFiles(owner, repoName, files)
         return if (result.success) {
             step.copy(status = StepStatus.COMPLETED, output = "Pushed to ${result.repo?.htmlUrl ?: repoName}")

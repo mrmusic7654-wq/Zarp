@@ -1,5 +1,6 @@
 package com.example.data
 
+import android.content.Context
 import android.util.Log
 import com.example.model.Message
 import com.google.ai.client.generativeai.GenerativeModel
@@ -13,7 +14,8 @@ import java.util.UUID
 class AgentLoopManager(
     private val geminiRepository: GeminiRepository,
     private val codeExecutionManager: CodeExecutionManager,
-    private val gitHubAgent: GitHubAgent
+    private val gitHubAgent: GitHubAgent,
+    private val context: Context
 ) {
 
     companion object {
@@ -21,10 +23,6 @@ class AgentLoopManager(
         private const val PLANNING_MODEL = "models/gemini-2.5-flash"
         private const val MAX_RETRIES = 3
     }
-
-    // ═══════════════════════════════════════════
-    // Data Classes
-    // ═══════════════════════════════════════════
 
     data class AgentTask(
         val id: String = UUID.randomUUID().toString(),
@@ -95,7 +93,7 @@ class AgentLoopManager(
 
             // Phase 2-4: Execute each step
             val completedSteps = mutableListOf<AgentStep>()
-            var gitHubFiles = mutableListOf<GitHubAgent.FileInfo>()
+            val gitHubFiles = mutableListOf<GitHubAgent.FileInfo>()
             var executionOutput: String? = null
 
             for ((index, step) in steps.withIndex()) {
@@ -171,8 +169,8 @@ class AgentLoopManager(
         chatHistory: List<Message> = emptyList()
     ): String = withContext(Dispatchers.IO) {
         try {
-            val key = KeyManager.getGeminiKey(null) ?: return@withContext ""
-            val context = chatHistory.joinToString("\n") { "${if (it.isUser) "User" else "Zarp"}: ${it.text}" }
+            val key = KeyManager.getGeminiKey(context) ?: return@withContext ""
+            val contextBlock = chatHistory.joinToString("\n") { "${if (it.isUser) "User" else "Zarp"}: ${it.text}" }
 
             val model = GenerativeModel(
                 modelName = PLANNING_MODEL,
@@ -188,7 +186,7 @@ You are an AI task planner. Break down this user request into sequential steps.
 
 User request: "$userRequest"
 
-${if (context.isNotBlank()) "Conversation context:\n$context" else ""}
+${if (contextBlock.isNotBlank()) "Conversation context:\n$contextBlock" else ""}
 
 Return ONLY a JSON array of steps. Each step must have:
 - "description": What this step does
@@ -198,10 +196,8 @@ Return ONLY a JSON array of steps. Each step must have:
 Example:
 [
   {"description": "Create LoginViewModel.kt", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "Create LoginScreen composable", "action": "GENERATE_CODE", "language": "kotlin"},
   {"description": "Review all files for errors", "action": "REVIEW_CODE", "language": "kotlin"},
-  {"description": "Push to GitHub", "action": "PUSH_TO_GITHUB", "language": ""},
-  {"description": "Create pull request", "action": "CREATE_PR", "language": ""}
+  {"description": "Push to GitHub", "action": "PUSH_TO_GITHUB", "language": ""}
 ]
 
 Return ONLY the JSON array. No other text.
@@ -232,117 +228,64 @@ Return ONLY the JSON array. No other text.
             }
         } catch (e: Exception) {
             Log.e(TAG, "Parse plan failed", e)
-            listOf(AgentStep(description = userRequest, action = StepAction.TEXT_RESPONSE))
+            listOf(AgentStep(description = "Fallback step", action = StepAction.TEXT_RESPONSE))
         }
     }
 
     // ═══════════════════════════════════════════
-    // Phase 2: Generate Code
+    // Step Executors
     // ═══════════════════════════════════════════
 
-    private suspend fun executeGenerateCode(
-        step: AgentStep,
-        userRequest: String,
-        chatHistory: List<Message>
-    ): AgentStep = withContext(Dispatchers.IO) {
-        try {
+    private suspend fun executeGenerateCode(step: AgentStep, userRequest: String, chatHistory: List<Message>): AgentStep {
+        return try {
             val response = geminiRepository.generateResponse(
                 prompt = "Generate code for: ${step.description}. Full context: $userRequest. Return ONLY the code.",
                 modelName = PLANNING_MODEL,
                 chatHistory = chatHistory
             )
-
             val fileName = extractFileName(step.description) ?: "generated.kt"
             val file = GitHubAgent.FileInfo(path = fileName, content = extractCode(response, "kotlin"))
-
             step.copy(status = StepStatus.COMPLETED, output = response, files = listOf(file))
         } catch (e: Exception) {
             step.copy(status = StepStatus.FAILED, output = "Generation failed: ${e.localizedMessage}")
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Phase 3: Execute Code
-    // ═══════════════════════════════════════════
-
     private suspend fun executeRunCode(step: AgentStep): AgentStep {
         val code = step.output ?: return step.copy(status = StepStatus.FAILED, output = "No code to execute")
         val result = codeExecutionManager.executePython(code)
-        return step.copy(
-            status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED,
-            executionResult = result,
-            output = result.output
-        )
+        return step.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, executionResult = result, output = result.output)
     }
-
-    // ═══════════════════════════════════════════
-    // Phase 4: Review Code
-    // ═══════════════════════════════════════════
 
     private suspend fun executeReviewCode(step: AgentStep): AgentStep {
         val code = step.output ?: return step.copy(status = StepStatus.FAILED, output = "No code to review")
-        val review = codeExecutionManager.reviewCode(code, "kotlin")
-
-        return if (review.passesReview) {
-            step.copy(status = StepStatus.COMPLETED, reviewResult = review, output = "Review passed: ${review.score}/10")
+        val fixResult = codeExecutionManager.autoFixAndValidate(code, "kotlin", maxAttempts = MAX_RETRIES)
+        return if (fixResult.success) {
+            step.copy(status = StepStatus.COMPLETED, reviewResult = CodeExecutionManager.CodeReview(fixResult.score, emptyList(), emptyList(), true), output = fixResult.finalCode)
         } else {
-            // Auto-fix
-            val fixResult = codeExecutionManager.autoFixAndValidate(code, "kotlin", MAX_RETRIES)
-            step.copy(
-                status = if (fixResult.success) StepStatus.COMPLETED else StepStatus.FAILED,
-                reviewResult = review,
-                output = fixResult.finalCode
-            )
+            step.copy(status = StepStatus.FAILED, output = "Review and fix failed after ${fixResult.attempts.size} attempts")
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Phase 5: Push to GitHub
-    // ═══════════════════════════════════════════
-
-    private suspend fun executePushToGitHub(
-        step: AgentStep,
-        files: List<GitHubAgent.FileInfo>
-    ): AgentStep {
+    private suspend fun executePushToGitHub(step: AgentStep, files: List<GitHubAgent.FileInfo>): AgentStep {
         if (files.isEmpty()) return step.copy(status = StepStatus.SKIPPED, output = "No files to push")
-
-        // Extract owner from GitHub token username
-        val owner = "user" // This should come from authenticated user info
         val repoName = "zarp-generated-${System.currentTimeMillis()}"
-
-        val result = gitHubAgent.createProjectFromFiles(repoName, files)
+        val owner = "user" // TODO: get from authenticated user
+        val result = gitHubAgent.pushFiles(owner, repoName, files)
         return if (result.success) {
-            step.copy(
-                status = StepStatus.COMPLETED,
-                output = "Pushed to ${result.repo?.htmlUrl ?: repoName}"
-            )
+            step.copy(status = StepStatus.COMPLETED, output = "Pushed to ${result.repo?.htmlUrl ?: repoName}")
         } else {
             step.copy(status = StepStatus.FAILED, output = "Push failed: ${result.error}")
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Create Pull Request
-    // ═══════════════════════════════════════════
-
     private suspend fun executeCreatePR(step: AgentStep): AgentStep {
-        return step.copy(
-            status = StepStatus.COMPLETED,
-            output = "Pull request would be created here"
-        )
+        return step.copy(status = StepStatus.COMPLETED, output = "Pull request created (placeholder)")
     }
 
-    // ═══════════════════════════════════════════
-    // Generate Text Response
-    // ═══════════════════════════════════════════
-
-    private suspend fun executeTextResponse(
-        step: AgentStep,
-        userRequest: String,
-        chatHistory: List<Message>
-    ): AgentStep {
+    private suspend fun executeTextResponse(step: AgentStep, userRequest: String, chatHistory: List<Message>): AgentStep {
         val response = geminiRepository.generateResponse(
-            prompt = "Respond to this request: ${step.description}. Original request: $userRequest",
+            prompt = "Respond to: ${step.description}. Original request: $userRequest",
             modelName = PLANNING_MODEL,
             chatHistory = chatHistory
         )

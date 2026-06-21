@@ -5,11 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -19,10 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.AgentLoopManager
 import com.example.data.KeyManager
 import com.example.data.UsageTracker
 import com.example.ui.components.AttachmentSheet
@@ -54,10 +50,8 @@ fun ChatScreen(
     val drawerWidth = configuration.screenWidthDp.dp * 0.85f
     val snackbarHostState = remember { SnackbarHostState() }
     var showModelSelector by remember { mutableStateOf(false) }
-    var showMoreMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Voice launcher
     val voiceLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -66,18 +60,12 @@ fun ChatScreen(
         else viewModel.onCancelVoice()
     }
 
-    // API key check
     LaunchedEffect(Unit) {
         if (KeyManager.getApiKey(context).isNullOrBlank()) {
-            snackbarHostState.showSnackbar(
-                message = "🔑 API key missing — Set it in Settings",
-                actionLabel = "Go",
-                duration = SnackbarDuration.Long
-            )
+            snackbarHostState.showSnackbar("API key missing. Set it in Settings → API Keys.")
         }
     }
 
-    // Drawer sync with animation
     LaunchedEffect(uiState.isDrawerOpen) {
         if (uiState.isDrawerOpen && drawerState.isClosed) drawerState.open()
         else if (!uiState.isDrawerOpen && drawerState.isOpen) drawerState.close()
@@ -88,7 +76,7 @@ fun ChatScreen(
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
-    // ── Sheets & Dialogs ────────────────────
+    // ── Sheets & Dialogs ──
     if (uiState.showAttachmentSheet) {
         AttachmentSheet(
             onDismiss = { viewModel.dismissAttachmentSheet() },
@@ -100,52 +88,47 @@ fun ChatScreen(
     }
 
     if (uiState.showStyleDialog) {
-        StyleDialog(
-            currentStyle = uiState.customStyle,
-            onApply = { viewModel.onCustomStyleChanged(it); viewModel.onDismissStyleDialog() },
-            onReset = { viewModel.onCustomStyleChanged(""); viewModel.onDismissStyleDialog() },
-            onDismiss = { viewModel.onDismissStyleDialog() }
+        var styleText by remember { mutableStateOf(uiState.customStyle) }
+        AlertDialog(
+            onDismissRequest = { viewModel.onDismissStyleDialog() },
+            title = { Text("🎭 Custom Response Style", color = ZarpTextPrimary, fontSize = 18.sp) },
+            text = {
+                Column {
+                    Text("Describe how you want Zarp to behave:", color = ZarpTextTertiary, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(value = styleText, onValueChange = { styleText = it },
+                        placeholder = { Text("e.g. Be brutally honest, roast me.", color = ZarpTextTertiary, fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = ZarpTextPrimary, unfocusedTextColor = ZarpTextPrimary, focusedBorderColor = ZarpAccent, unfocusedBorderColor = ZarpInputBorder, cursorColor = ZarpAccent),
+                        minLines = 3)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { viewModel.onCustomStyleChanged(""); viewModel.onDismissStyleDialog() }) {
+                        Text("🔄 Reset to default", color = ZarpTextTertiary)
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { viewModel.onCustomStyleChanged(styleText); viewModel.onDismissStyleDialog() }, colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)) { Text("✅ Apply", color = Color.White) } },
+            dismissButton = { TextButton(onClick = { viewModel.onDismissStyleDialog() }) { Text("Cancel", color = ZarpTextTertiary) } },
+            containerColor = ZarpSidebarBg
         )
     }
 
     if (uiState.showTranslateDialog && uiState.translateResult != null) {
-        TranslateResultDialog(
-            result = uiState.translateResult ?: "",
-            onDismiss = { viewModel.onDismissTranslateDialog() }
+        AlertDialog(
+            onDismissRequest = { viewModel.onDismissTranslateDialog() },
+            title = { Text("🌐 Translation", color = ZarpTextPrimary, fontSize = 18.sp) },
+            text = { SelectionContainer { Text(uiState.translateResult ?: "", color = ZarpTextPrimary, fontSize = 15.sp, lineHeight = 24.sp) } },
+            confirmButton = { Button(onClick = { viewModel.onDismissTranslateDialog() }, colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)) { Text("OK", color = Color.White) } },
+            containerColor = ZarpSidebarBg
         )
     }
 
-    // ── More Options Dropdown ──────────────
-    if (showMoreMenu) {
-        DropdownMenu(
-            expanded = showMoreMenu,
-            onDismissRequest = { showMoreMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("📋 Export Chat", color = ZarpTextPrimary) },
-                onClick = { showMoreMenu = false }
-            )
-            DropdownMenuItem(
-                text = { Text("🗑️ Clear History", color = ZarpTextPrimary) },
-                onClick = { showMoreMenu = false; viewModel.onNewChat() }
-            )
-            DropdownMenuItem(
-                text = { Text("⚙️ Settings", color = ZarpTextPrimary) },
-                onClick = { showMoreMenu = false; onNavigateToSettings() }
-            )
-        }
-    }
-
-    // ── Main Layout ─────────────────────────
     ModalNavigationDrawer(
-        drawerState = drawerState,
-        gesturesEnabled = true,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
+        drawerState = drawerState, gesturesEnabled = true, scrimColor = Color.Black.copy(alpha = 0.5f),
         drawerContent = {
             Box(modifier = Modifier.width(drawerWidth)) {
                 SidebarDrawer(
-                    conversations = uiState.conversations,
-                    currentConversationId = uiState.currentConversationId,
+                    conversations = uiState.conversations, currentConversationId = uiState.currentConversationId,
                     onNewChat = { viewModel.onNewChat(); scope.launch { drawerState.close() } },
                     onSelectConversation = { viewModel.onSelectConversation(it); scope.launch { drawerState.close() } },
                     onDeleteConversation = { viewModel.onDeleteConversation(it) },
@@ -155,177 +138,79 @@ fun ChatScreen(
         }
     ) {
         Scaffold(
-            snackbarHost = {
-                SnackbarHost(hostState = snackbarHostState) { data ->
-                    Snackbar(
-                        snackbarData = data,
-                        containerColor = ZarpBubbleBg,
-                        contentColor = ZarpTextPrimary,
-                        actionColor = ZarpAccent,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            },
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
             topBar = {
                 TopAppBar(
                     title = {
-                        // ── Model Selector ──
                         Box {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (showModelSelector) ZarpBubbleBg else Color.Transparent)
-                                    .clickable { showModelSelector = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                modifier = Modifier.clickable { showModelSelector = true }.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                Text(
-                                    uiState.selectedModel,
-                                    color = ZarpTextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Default.ExpandMore,
-                                    "Models",
-                                    tint = ZarpAccent,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Text(uiState.selectedModel, color = ZarpTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(Icons.Default.ExpandMore, "Model", tint = ZarpAccent, modifier = Modifier.padding(start = 2.dp).size(16.dp))
                             }
-
-                            DropdownMenu(
-                                expanded = showModelSelector,
-                                onDismissRequest = { showModelSelector = false },
-                                modifier = Modifier.width(240.dp)
-                            ) {
-                                Text(
-                                    "Select Model",
-                                    color = ZarpTextTertiary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                                )
-                                HorizontalDivider(color = ZarpDivider)
-
+                            DropdownMenu(expanded = showModelSelector, onDismissRequest = { showModelSelector = false }) {
                                 ChatViewModel.availableModels.forEach { model ->
-                                    val used = UsageTracker.getCount(context, model)
-                                    val limit = UsageTracker.getLimit(model)
-                                    val percentage = if (limit > 0) (used * 100 / limit).coerceIn(0, 100) else 0
-                                    val isSelected = uiState.selectedModel == model
-
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column(modifier = Modifier.fillMaxWidth()) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    if (isSelected) {
-                                                        Icon(Icons.Default.Check, null, tint = ZarpAccent, modifier = Modifier.size(14.dp))
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                    }
-                                                    Text(
-                                                        model,
-                                                        fontSize = 13.sp,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isSelected) ZarpAccent else ZarpTextPrimary
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.height(3.dp))
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(
-                                                        "$used / $limit",
-                                                        fontSize = 10.sp,
-                                                        color = ZarpTextTertiary
-                                                    )
-                                                    Spacer(modifier = Modifier.weight(1f))
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .width(60.dp)
-                                                            .height(3.dp)
-                                                            .clip(RoundedCornerShape(2.dp))
-                                                            .background(Color(0xFF333333))
-                                                    ) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .fillMaxWidth(percentage / 100f)
-                                                                .height(3.dp)
-                                                                .clip(RoundedCornerShape(2.dp))
-                                                                .background(
-                                                                    when {
-                                                                        percentage > 80 -> Color(0xFFFF5252)
-                                                                        percentage > 50 -> Color(0xFFFFC107)
-                                                                        else -> ZarpAccent
-                                                                    }
-                                                                )
-                                                        )
-                                                    }
-                                                }
+                                    val used = UsageTracker.getCount(context, model); val limit = UsageTracker.getLimit(model); val percentage = if (limit > 0) (used * 100 / limit).coerceIn(0, 100) else 0
+                                    DropdownMenuItem(text = {
+                                        Column(modifier = Modifier.width(200.dp)) {
+                                            Text(model, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (uiState.selectedModel == model) ZarpAccent else ZarpTextPrimary)
+                                            Text("$used / $limit today", fontSize = 10.sp, color = ZarpTextTertiary)
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Box(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(Color(0xFF444444))) {
+                                                Box(Modifier.fillMaxWidth(percentage / 100f).height(2.dp).clip(RoundedCornerShape(1.dp)).background(when { percentage > 80 -> Color(0xFFFF5252); percentage > 50 -> Color(0xFFFFC107); else -> ZarpAccent }))
                                             }
-                                        },
-                                        onClick = {
-                                            viewModel.onModelSelected(model)
-                                            showModelSelector = false
                                         }
-                                    )
+                                    }, onClick = { viewModel.onModelSelected(model); showModelSelector = false })
                                 }
                             }
                         }
                     },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, "History", tint = ZarpTextPrimary)
-                        }
-                    },
+                    navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "Menu", tint = ZarpTextPrimary) } },
                     actions = {
-                        // Stop button — animated
-                        AnimatedVisibility(
-                            visible = uiState.isAiThinking || uiState.isPaused,
-                            enter = scaleIn() + fadeIn(),
-                            exit = scaleOut() + fadeOut()
-                        ) {
+                        AnimatedVisibility(visible = uiState.isAiThinking || uiState.isPaused, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
                             IconButton(onClick = { viewModel.onStopGeneration() }) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFFFF5252)),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                Box(Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFFF5252)), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Stop, "Stop", tint = Color.White, modifier = Modifier.size(14.dp))
                                 }
                             }
                         }
-
-                        // Style button — glows when custom style is active
-                        IconButton(onClick = { viewModel.onShowStyleDialog() }) {
-                            Icon(
-                                Icons.Outlined.AutoAwesome,
-                                "Style",
-                                tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // New chat
-                        IconButton(onClick = { viewModel.onNewChat() }) {
-                            Icon(Icons.Outlined.Edit, "New chat", tint = ZarpTextPrimary, modifier = Modifier.size(20.dp))
-                        }
-
-                        // More menu
-                        IconButton(onClick = { showMoreMenu = true }) {
-                            Icon(Icons.Default.MoreVert, "More", tint = ZarpTextTertiary, modifier = Modifier.size(20.dp))
-                        }
+                        IconButton(onClick = { viewModel.onShowStyleDialog() }) { Icon(Icons.Outlined.AutoAwesome, "Style", tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp)) }
+                        IconButton(onClick = { viewModel.onNewChat() }) { Icon(Icons.Outlined.Edit, "New", tint = ZarpTextPrimary) }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = ZarpMainBg,
-                        scrolledContainerColor = ZarpMainBg,
-                        titleContentColor = ZarpTextPrimary
-                    )
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = ZarpMainBg, scrolledContainerColor = ZarpMainBg)
                 )
             },
-            containerColor = ZarpMainBg,
-            bottomBar = {
+            containerColor = ZarpMainBg
+        ) { paddingValues ->
+            Column(Modifier.fillMaxSize().padding(paddingValues)) {
+
+                // ── Agent Progress Panel ──
+                AnimatedVisibility(
+                    visible = uiState.isAgentMode && uiState.agentProgress != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    uiState.agentProgress?.let { progress ->
+                        AgentProgressPanel(progress = progress, agentResult = uiState.agentTaskResult)
+                    }
+                }
+
+                // ── Messages ──
+                MessageList(
+                    messages = uiState.messages, isAiThinking = uiState.isAiThinking, modifier = Modifier.weight(1f),
+                    speakingMessageId = uiState.speakingMessageId,
+                    onSpeakMessage = { id, text -> viewModel.onSpeakMessage(id, text) },
+                    likedMessages = uiState.likedMessages, dislikedMessages = uiState.dislikedMessages,
+                    onLikeMessage = { viewModel.onLikeMessage(it) },
+                    onDislikeMessage = { viewModel.onDislikeMessage(it) },
+                    onRegenerate = { viewModel.onRegenerate() },
+                    isSearchMode = uiState.isSearchMode,
+                    searchProgress = if (uiState.isAiThinking && uiState.isSearchMode) 0.5f else 0f,
+                    searchEngines = emptyMap()
+                )
+
                 // ── Input Bar ──
                 InputBar(
                     inputText = uiState.inputText,
@@ -345,144 +230,86 @@ fun ChatScreen(
                     isTranslateMode = uiState.isTranslateMode,
                     onToggleTranslateMode = { viewModel.onToggleTranslateMode() },
                     isSearchMode = uiState.isSearchMode,
-                    onToggleSearchMode = { viewModel.onToggleSearchMode() }
+                    onToggleSearchMode = { viewModel.onToggleSearchMode() },
+                    isAgentMode = uiState.isAgentMode,
+                    onToggleAgentMode = { viewModel.onToggleAgentMode() }
                 )
             }
-        ) { paddingValues ->
-            // ── Message List ──
-            MessageList(
-                messages = uiState.messages,
-                isAiThinking = uiState.isAiThinking,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                speakingMessageId = uiState.speakingMessageId,
-                onSpeakMessage = { id, text -> viewModel.onSpeakMessage(id, text) },
-                likedMessages = uiState.likedMessages,
-                dislikedMessages = uiState.dislikedMessages,
-                onLikeMessage = { viewModel.onLikeMessage(it) },
-                onDislikeMessage = { viewModel.onDislikeMessage(it) },
-                onRegenerate = { viewModel.onRegenerate() }
-            )
         }
     }
 }
 
-// ──────────────────────────────────────────────
-// Style Dialog
-// ──────────────────────────────────────────────
-@Composable
-private fun StyleDialog(
-    currentStyle: String,
-    onApply: (String) -> Unit,
-    onReset: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    var styleText by remember { mutableStateOf(currentStyle) }
+// ═══════════════════════════════════════════
+// Agent Progress Panel
+// ═══════════════════════════════════════════
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.AutoAwesome, null, tint = ZarpAccent, modifier = Modifier.size(22.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Custom Response Style", color = ZarpTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        text = {
-            Column {
+@Composable
+private fun AgentProgressPanel(
+    progress: AgentLoopManager.AgentProgress,
+    agentResult: AgentLoopManager.AgentResult?
+) {
+    val statusColor = when (progress.status) {
+        AgentLoopManager.AgentStatus.COMPLETED -> Color(0xFF00E676)
+        AgentLoopManager.AgentStatus.FAILED -> Color(0xFFFF5252)
+        else -> ZarpAccent
+    }
+
+    val statusEmoji = when (progress.status) {
+        AgentLoopManager.AgentStatus.PLANNING -> "🧠"
+        AgentLoopManager.AgentStatus.EXECUTING -> "⚡"
+        AgentLoopManager.AgentStatus.REVIEWING -> "🔍"
+        AgentLoopManager.AgentStatus.FIXING -> "🔧"
+        AgentLoopManager.AgentStatus.PUSHING -> "📤"
+        AgentLoopManager.AgentStatus.COMPLETED -> "✅"
+        AgentLoopManager.AgentStatus.FAILED -> "❌"
+        else -> "🤖"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0D1F0D))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(statusEmoji, fontSize = 18.sp)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Tell Zarp how to behave in every response:",
-                    color = ZarpTextTertiary,
-                    fontSize = 13.sp
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = styleText,
-                    onValueChange = { styleText = it },
-                    placeholder = {
-                        Text(
-                            "e.g. Be brutally honest, use dark humor, roast me gently. No sugarcoating.",
-                            color = ZarpTextTertiary,
-                            fontSize = 12.sp
-                        )
+                    text = when (progress.status) {
+                        AgentLoopManager.AgentStatus.PLANNING -> "Planning task..."
+                        AgentLoopManager.AgentStatus.EXECUTING -> "Executing step ${progress.currentStep}/${progress.totalSteps}"
+                        AgentLoopManager.AgentStatus.REVIEWING -> "Reviewing code..."
+                        AgentLoopManager.AgentStatus.FIXING -> "Fixing issues..."
+                        AgentLoopManager.AgentStatus.PUSHING -> "Pushing to GitHub..."
+                        AgentLoopManager.AgentStatus.COMPLETED -> "Task completed!"
+                        AgentLoopManager.AgentStatus.FAILED -> "Task failed"
+                        else -> progress.stepDescription
                     },
-                    modifier = Modifier.fillMaxWidth().height(130.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = ZarpTextPrimary,
-                        unfocusedTextColor = ZarpTextPrimary,
-                        focusedBorderColor = ZarpAccent,
-                        unfocusedBorderColor = ZarpInputBorder,
-                        cursorColor = ZarpAccent
-                    ),
-                    minLines = 3
+                    color = statusColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                if (currentStyle.isNotBlank()) {
-                    TextButton(onClick = onReset) {
-                        Icon(Icons.Outlined.Refresh, null, tint = ZarpTextTertiary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reset to default", color = ZarpTextTertiary, fontSize = 12.sp)
-                    }
-                }
+                Text(progress.message, color = Color(0xFF81C784), fontSize = 11.sp)
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onApply(styleText) },
-                colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("✅ Apply", color = Color.White, fontWeight = FontWeight.Medium)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = ZarpTextTertiary)
-            }
-        },
-        containerColor = ZarpSidebarBg,
-        shape = RoundedCornerShape(20.dp)
-    )
-}
+            Text("${(progress.percentage * 100).toInt()}%", color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
 
-// ──────────────────────────────────────────────
-// Translate Result Dialog
-// ──────────────────────────────────────────────
-@Composable
-private fun TranslateResultDialog(
-    result: String,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🌐", fontSize = 20.sp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Translation", color = ZarpTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        if (progress.status != AgentLoopManager.AgentStatus.COMPLETED && progress.status != AgentLoopManager.AgentStatus.FAILED) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { progress.percentage },
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
+                color = statusColor, trackColor = Color(0xFF1A3A1A)
+            )
+        }
+
+        // Show result summary when completed
+        if (progress.status == AgentLoopManager.AgentStatus.COMPLETED && agentResult != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(agentResult.summary, color = Color(0xFFC8E6C9), fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            if (agentResult.repoUrl != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("🔗 ${agentResult.repoUrl}", color = ZarpAccent, fontSize = 10.sp)
             }
-        },
-        text = {
-            SelectionContainer {
-                Text(
-                    result,
-                    color = ZarpTextPrimary,
-                    fontSize = 15.sp,
-                    lineHeight = 24.sp
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("OK", color = Color.White)
-            }
-        },
-        containerColor = ZarpSidebarBg,
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }

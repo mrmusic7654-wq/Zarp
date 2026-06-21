@@ -16,7 +16,7 @@ class ChatRepository(context: Context) {
 
     private val conversationsFile = File(context.filesDir, "zarp_conversations.json")
     private val messagesDir = File(context.filesDir, "zarp_messages")
-    
+
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: Flow<List<Conversation>> = _conversations.asStateFlow()
 
@@ -72,10 +72,7 @@ class ChatRepository(context: Context) {
     suspend fun getMessagesForConversationOnce(conversationId: String): List<Message> {
         return try {
             val file = getMessagesFile(conversationId)
-            if (!file.exists()) {
-                Log.d("ChatRepo", "No messages file for $conversationId")
-                return emptyList()
-            }
+            if (!file.exists()) return emptyList()
             val json = file.readText()
             val arr = JSONArray(json)
             val list = mutableListOf<Message>()
@@ -98,7 +95,7 @@ class ChatRepository(context: Context) {
 
     suspend fun createNewConversation(firstMessage: String): Conversation {
         val conversationId = UUID.randomUUID().toString()
-        val title = if (firstMessage.length > 40) firstMessage.take(40) + "..." else firstMessage
+        val title = generateTitle(firstMessage)
         val conv = Conversation(
             id = conversationId,
             title = title,
@@ -110,7 +107,6 @@ class ChatRepository(context: Context) {
         _conversations.value = list
         saveConversations()
 
-        // Save the first message
         val userMessage = Message(
             id = UUID.randomUUID().toString(),
             text = firstMessage,
@@ -118,7 +114,7 @@ class ChatRepository(context: Context) {
             timestamp = System.currentTimeMillis()
         )
         saveMessageToFile(conversationId, userMessage)
-        Log.d("ChatRepo", "✅ Created conversation: $conversationId - $title")
+        Log.d("ChatRepo", "✅ Created: $conversationId - $title")
         return conv
     }
 
@@ -130,27 +126,39 @@ class ChatRepository(context: Context) {
             timestamp = System.currentTimeMillis()
         )
         saveMessageToFile(conversationId, message)
-        Log.d("ChatRepo", "✅ Added ${if (isUser) "user" else "AI"} message to $conversationId")
+
+        // Auto‑update title if it's still generic
+        val conv = _conversations.value.find { it.id == conversationId }
+        if (conv != null && (conv.title == "New chat" || conv.title.startsWith("📷") || conv.title.startsWith("📎"))) {
+            val messages = getMessagesForConversationOnce(conversationId)
+            if (messages.size >= 2) {
+                val newTitle = generateTitle(messages.firstOrNull { it.isUser }?.text ?: text)
+                updateConversationTitle(conversationId, newTitle)
+            }
+        }
     }
 
-    private fun saveMessageToFile(conversationId: String, message: Message) {
-        try {
-            val file = getMessagesFile(conversationId)
-            val arr = if (file.exists()) {
-                JSONArray(file.readText())
-            } else {
-                JSONArray()
-            }
-            val obj = JSONObject()
-            obj.put("id", message.id)
-            obj.put("text", message.text)
-            obj.put("isUser", message.isUser)
-            obj.put("timestamp", message.timestamp)
-            arr.put(obj)
-            file.writeText(arr.toString())
-        } catch (e: Exception) {
-            Log.e("ChatRepo", "Failed to save message", e)
+    private fun updateConversationTitle(id: String, title: String) {
+        val list = _conversations.value.toMutableList()
+        val index = list.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            list[index] = list[index].copy(title = title)
+            _conversations.value = list
+            saveConversations()
         }
+    }
+
+    fun updateConversationTitle(conversationId: String, newTitle: String) {
+        updateConversationTitle(conversationId, newTitle)
+    }
+
+    private fun generateTitle(text: String): String {
+        val cleaned = text
+            .replace(Regex("📎.*$"), "")
+            .replace(Regex("📷.*$"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return if (cleaned.length > 40) cleaned.take(40) + "..." else cleaned.ifBlank { "New chat" }
     }
 
     suspend fun deleteConversation(conversationId: String) {
@@ -159,6 +167,19 @@ class ChatRepository(context: Context) {
         list.removeAll { it.id == conversationId }
         _conversations.value = list
         saveConversations()
-        Log.d("ChatRepo", "🗑️ Deleted conversation $conversationId")
+        Log.d("ChatRepo", "🗑️ Deleted $conversationId")
     }
+
+    fun searchConversations(query: String): List<Conversation> {
+        if (query.isBlank()) return _conversations.value
+        val q = query.lowercase()
+        return _conversations.value.filter { conv ->
+            conv.title.lowercase().contains(q) || conv.id.lowercase().contains(q)
+        }
+    }
+
+    fun getConversationCount(): Int = _conversations.value.size
+    fun getTotalMessageCount(): Int = messagesDir.listFiles()?.sumOf { file ->
+        try { JSONArray(file.readText()).length() } catch (e: Exception) { 0 }
+    } ?: 0
 }

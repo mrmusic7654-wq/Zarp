@@ -213,7 +213,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)
-                chatRepository.addMessageToConversation(conversationId ?: "", responseText, false)
+                val convId = conversationId ?: ""
+                   chatRepository.addMessageToConversation(convId, responseText, false)
 
                 viewModelScope.launch {
                     geminiRepository.storeMessageEmbedding(responseText)

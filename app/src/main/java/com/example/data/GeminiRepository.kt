@@ -16,7 +16,7 @@ class GeminiRepository(private val context: Context) {
     private val fullContextCount = 5
     private val embeddingManager = EmbeddingManager(context)
 
-    private fun getModel(modelName: String, customStyle: String = ""): GenerativeModel? {
+    private fun getModel(modelName: String, customStyle: String = "", useSearch: Boolean = false): GenerativeModel? {
         val key = KeyManager.getGeminiKey(context) ?: return null
 
         val defaultInstruction = """
@@ -28,6 +28,7 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
 - Use triple backticks with language name for code blocks.
 - Use tables when presenting structured data.
 - When reasoning step‑by‑step, wrap it in [THINKING]…[/THINKING] before your final answer.
+- When using web search, cite sources briefly at the end like [Source: site.com].
 - Be warm, direct, and enjoyable to chat with.
         """.trimIndent()
 
@@ -37,16 +38,27 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
             defaultInstruction
         }
 
+        val config = com.google.ai.client.generativeai.type.generationConfig {
+            temperature = 0.7f
+            topK = 40
+            topP = 0.95f
+            maxOutputTokens = 8192
+        }
+
         return GenerativeModel(
             modelName = modelName,
             apiKey = key,
-            generationConfig = com.google.ai.client.generativeai.type.generationConfig {
-                temperature = 0.7f
-                topK = 40
-                topP = 0.95f
-                maxOutputTokens = 8192
-            },
-            systemInstruction = content { text(finalInstruction) }
+            generationConfig = config,
+            systemInstruction = content { text(finalInstruction) },
+            tools = if (useSearch) {
+                listOf(
+                    com.google.ai.client.generativeai.type.tool(
+                        googleSearch = com.google.ai.client.generativeai.type.googleSearch()
+                    )
+                )
+            } else {
+                null
+            }
         )
     }
 
@@ -95,9 +107,10 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
         prompt: String,
         modelName: String,
         chatHistory: List<Message> = emptyList(),
-        customStyle: String = ""
+        customStyle: String = "",
+        useSearch: Boolean = false
     ): String = withContext(Dispatchers.IO) {
-        val model = getModel(modelName, customStyle) ?: return@withContext "⚠️ API key not set."
+        val model = getModel(modelName, customStyle, useSearch) ?: return@withContext "⚠️ API key not set."
         try {
             val contextBlock = buildContext(chatHistory, prompt)
             val response = model.generateContent(
@@ -106,7 +119,39 @@ You are Zarp, a friendly and capable AI assistant built on Gemini.
                     text(prompt)
                 }
             )
-            response.text ?: "No response."
+
+            val rawText = response.text ?: "No response."
+
+            // Extract grounding metadata if search was used
+            if (useSearch) {
+                val groundingChunks = response.rawResponse?.candidatesList
+                    ?.firstOrNull()
+                    ?.groundingMetadata
+                    ?.groundingChunksList
+
+                if (!groundingChunks.isNullOrEmpty()) {
+                    val sources = groundingChunks.mapNotNull { chunk ->
+                        chunk.web?.let { web ->
+                            web.uri?.let { uri ->
+                                web.title?.let { title ->
+                                    "[Source: $title - $uri]"
+                                } ?: "[Source: $uri]"
+                            }
+                        }
+                    }.distinct().take(5)
+
+                    if (sources.isNotEmpty()) {
+                        val sourceText = sources.joinToString("\n")
+                        "$rawText\n\n---\n🌐 *Searched ${sources.size} source(s):*\n$sourceText"
+                    } else {
+                        "$rawText\n\n---\n🌐 *Web search enabled*"
+                    }
+                } else {
+                    rawText
+                }
+            } else {
+                rawText
+            }
         } catch (e: Exception) {
             Log.e("GeminiRepo", "Error for $modelName: ${e.localizedMessage}", e)
             val msg = e.localizedMessage ?: ""

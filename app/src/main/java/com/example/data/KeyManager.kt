@@ -52,6 +52,14 @@ object KeyManager {
     fun getCustomKey(context: Context, slot: Int): String? {
         return getPrefs(context).getString("api_key_custom_$slot", null)
     }
+    // Hugging Face Space URL
+fun saveHFSpaceUrl(context: Context, url: String) {
+    getPrefs(context).edit().putString("hf_space_url", url).apply()
+}
+
+fun getHFSpaceUrl(context: Context): String {
+    return getPrefs(context).getString("hf_space_url", "") ?: ""
+}
 
     // Legacy
     fun saveApiKey(context: Context, key: String) = saveGeminiKey(context, key)

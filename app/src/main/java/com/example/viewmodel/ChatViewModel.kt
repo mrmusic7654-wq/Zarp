@@ -32,6 +32,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val isPaused: Boolean = false,
         val currentConversationId: String? = null,
         val conversations: List<Conversation> = emptyList(),
+        val tasks: List<Conversation> = emptyList(),
         val isDrawerOpen: Boolean = false,
         val showAttachmentSheet: Boolean = false,
         val selectedImageUris: List<Uri> = emptyList(),
@@ -107,9 +108,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            chatRepository.getAllConversations().collect { _uiState.value = _uiState.value.copy(conversations = it) }
+            chatRepository.getAllConversations().collect { conversations ->
+                _uiState.value = _uiState.value.copy(conversations = conversations)
+            }
+        }
+        viewModelScope.launch {
+            chatRepository.getAllTasks().collect { tasks ->
+                _uiState.value = _uiState.value.copy(tasks = tasks)
+            }
         }
     }
+
+    // ═══════════════════════════════════════════
+    // File Helpers
+    // ═══════════════════════════════════════════
 
     private fun getFileType(uri: Uri): String {
         val mime = getApplication<Application>().contentResolver.getType(uri) ?: return "📎"
@@ -124,10 +136,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ═══════════════════════════════════════════
+    // Toggles
+    // ═══════════════════════════════════════════
+
     fun onInputChanged(text: String) { _uiState.value = _uiState.value.copy(inputText = text) }
     fun onToggleTranslateMode() { _uiState.value = _uiState.value.copy(isTranslateMode = !_uiState.value.isTranslateMode) }
     fun onToggleSearchMode() { _uiState.value = _uiState.value.copy(isSearchMode = !_uiState.value.isSearchMode) }
     fun onToggleAgentMode() { _uiState.value = _uiState.value.copy(isAgentMode = !_uiState.value.isAgentMode) }
+
+    // ═══════════════════════════════════════════
+    // Send
+    // ═══════════════════════════════════════════
 
     fun onSend() {
         if (_uiState.value.isAgentMode) onSendAgent() else onSendChat()
@@ -164,12 +184,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         currentGenerationJob = viewModelScope.launch {
             try {
                 if (_uiState.value.isTranslateMode && currentText.isNotBlank()) currentText = geminiRepository.translate(currentText, "English")
-                val safeConvId = if (conversationId == null && !isRegenerate) { val nc = chatRepository.createNewConversation(displayText); conversationId = nc.id; _uiState.value = _uiState.value.copy(currentConversationId = conversationId); conversationId } else { if (!isRegenerate && conversationId != null) chatRepository.addMessageToConversation(conversationId, displayText, true); conversationId ?: "" }
+                val safeConvId = if (conversationId == null && !isRegenerate) {
+                    val nc = chatRepository.createNewConversation(displayText); conversationId = nc.id
+                    _uiState.value = _uiState.value.copy(currentConversationId = conversationId); conversationId
+                } else {
+                    if (!isRegenerate && conversationId != null) chatRepository.addMessageToConversation(conversationId, displayText, true)
+                    conversationId ?: ""
+                }
                 val history = currentMessages.dropLast(1)
                 val modelName = getModelApiName(_uiState.value.selectedModel)
                 val firstUri = imageUris.firstOrNull()
                 val isImage = firstUri?.let { getApplication<Application>().contentResolver.getType(it)?.startsWith("image/") == true } ?: false
-                var responseText = if (isImage && firstUri != null) geminiRepository.generateResponseWithImage(currentText, firstUri, modelName, history, _uiState.value.customStyle) else { val fc = if (firstUri != null && !isImage) readFileContent(firstUri) else ""; val fp = if (fc.isNotBlank()) "$currentText\n\n[File]:\n$fc" else currentText; geminiRepository.generateResponse(fp, modelName, history, _uiState.value.customStyle, _uiState.value.isSearchMode) }
+                var responseText = if (isImage && firstUri != null) geminiRepository.generateResponseWithImage(currentText, firstUri, modelName, history, _uiState.value.customStyle)
+                else { val fc = if (firstUri != null && !isImage) readFileContent(firstUri) else ""; val fp = if (fc.isNotBlank()) "$currentText\n\n[File]:\n$fc" else currentText; geminiRepository.generateResponse(fp, modelName, history, _uiState.value.customStyle, _uiState.value.isSearchMode) }
                 if (_uiState.value.isTranslateMode) responseText = geminiRepository.translate(responseText, _uiState.value.translateLanguage)
                 UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)
                 chatRepository.addMessageToConversation(safeConvId, responseText, false)
@@ -190,24 +217,82 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastUserPrompt = currentText
         val userMessage = Message(UUID.randomUUID().toString(), "🤖 Agent: $currentText", true, System.currentTimeMillis())
 
-        _uiState.value = _uiState.value.copy(messages = _uiState.value.messages + userMessage, inputText = "", isAiThinking = true, isPaused = false, agentProgress = null, agentTaskResult = null)
+        _uiState.value = _uiState.value.copy(
+            messages = _uiState.value.messages + userMessage, inputText = "", isAiThinking = true, isPaused = false,
+            agentProgress = null, agentTaskResult = null
+        )
 
         currentGenerationJob = viewModelScope.launch {
             try {
-                val task = agentLoopManager.executeAgentTask(userRequest = currentText, chatHistory = _uiState.value.messages.dropLast(1)) { progress ->
+                val task = agentLoopManager.executeAgentTask(
+                    userRequest = currentText,
+                    chatHistory = _uiState.value.messages.dropLast(1)
+                ) { progress ->
                     _uiState.value = _uiState.value.copy(agentProgress = progress)
                 }
+
                 val responseText = task.result?.summary ?: "Agent task completed."
                 val aiMessage = Message(UUID.randomUUID().toString(), responseText, false, System.currentTimeMillis())
-                _uiState.value = _uiState.value.copy(messages = _uiState.value.messages + aiMessage, isAiThinking = false, agentTaskResult = task.result)
+                _uiState.value = _uiState.value.copy(
+                    messages = _uiState.value.messages + aiMessage, isAiThinking = false, agentTaskResult = task.result
+                )
+
+                // Auto-promote agent tasks to Task History
+                _uiState.value.currentConversationId?.let { chatRepository.promoteToTask(it) }
+
                 lastUserPrompt = ""
             } catch (e: CancellationException) { _uiState.value = _uiState.value.copy(isAiThinking = false); throw e }
             catch (e: Exception) { Log.e("ChatVM", "Agent failed", e); _uiState.value = _uiState.value.copy(isAiThinking = false) }
         }
     }
 
-    fun onRegenerate() { if (lastUserPrompt.isBlank()) _uiState.value.messages.findLast { it.isUser }?.let { lastUserPrompt = it.text }; if (lastUserPrompt.isNotBlank()) { _uiState.value = _uiState.value.copy(inputText = ""); onSend() } }
-    private fun readFileContent(uri: Uri): String = try { getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.readText()?.take(4000) ?: "" } catch (e: Exception) { "" }
+    // ═══════════════════════════════════════════
+    // Task History
+    // ═══════════════════════════════════════════
+
+    fun onSelectTask(id: String) {
+        currentGenerationJob?.cancel(); currentGenerationJob = null
+        lastUserPrompt = ""; lastImageUris = emptyList()
+        _uiState.value = _uiState.value.copy(
+            currentConversationId = id, isDrawerOpen = false, isAiThinking = false, isPaused = false, messages = emptyList()
+        )
+        viewModelScope.launch {
+            try {
+                val msgs = chatRepository.getMessagesForConversationOnce(id)
+                _uiState.value = _uiState.value.copy(messages = msgs)
+                msgs.findLast { it.isUser }?.let { lastUserPrompt = it.text }
+                Log.d("ChatVM", "🤖 Loaded task: ${msgs.size} messages")
+            } catch (e: Exception) {
+                Log.e("ChatVM", "Failed to load task $id", e)
+            }
+        }
+    }
+
+    fun onDeleteTask(id: String) {
+        viewModelScope.launch {
+            chatRepository.deleteTask(id)
+            if (_uiState.value.currentConversationId == id) onNewChat()
+        }
+    }
+
+    fun onPromoteToTask() {
+        _uiState.value.currentConversationId?.let { id ->
+            viewModelScope.launch { chatRepository.promoteToTask(id) }
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // Helpers
+    // ═══════════════════════════════════════════
+
+    fun onRegenerate() {
+        if (lastUserPrompt.isBlank()) _uiState.value.messages.findLast { it.isUser }?.let { lastUserPrompt = it.text }
+        if (lastUserPrompt.isNotBlank()) { _uiState.value = _uiState.value.copy(inputText = ""); onSend() }
+    }
+
+    private fun readFileContent(uri: Uri): String = try {
+        getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.readText()?.take(4000) ?: ""
+    } catch (e: Exception) { "" }
 
     fun onPauseGeneration() { currentGenerationJob?.cancel(); currentGenerationJob = null; _uiState.value = _uiState.value.copy(isPaused = true, isAiThinking = false) }
     fun onResumeGeneration() { if (_uiState.value.isPaused) { _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = true); onSend() } }
@@ -215,9 +300,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onVoiceResult(text: String) { _uiState.value = _uiState.value.copy(inputText = text, isListening = false); if (text.isNotBlank()) onSend() }
     fun onCancelVoice() { _uiState.value = _uiState.value.copy(isListening = false) }
-    fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) { try { _uiState.value = _uiState.value.copy(isListening = true, inputText = ""); launcher.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM); putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak..."); putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1) }) } catch (e: Exception) { onCancelVoice() } }
+    fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) {
+        try {
+            _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
+            launcher.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak..."); putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            })
+        } catch (e: Exception) { onCancelVoice() }
+    }
 
-    fun onSpeakMessage(messageId: String, text: String) { if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) { onStopSpeaking(); return }; _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId); androidTTS.speak(text) { _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null) } }
+    fun onSpeakMessage(messageId: String, text: String) {
+        if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) { onStopSpeaking(); return }
+        _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId)
+        androidTTS.speak(text) { _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null) }
+    }
     fun onStopSpeaking() { androidTTS.stop(); _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null) }
 
     fun onLikeMessage(id: String) { val l = _uiState.value.likedMessages.toMutableSet(); val d = _uiState.value.dislikedMessages.toMutableSet(); if (id in l) l.remove(id) else { l.add(id); d.remove(id) }; _uiState.value = _uiState.value.copy(likedMessages = l, dislikedMessages = d) }

@@ -1,5 +1,5 @@
 package com.example.data
-
+import com.example.data.search.WebSearchManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -97,6 +97,99 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
             """.trimIndent()
         }
     }
+    /**
+ * Generate response with web search context injected.
+ * Uses HF Space for search, Gemini for intelligent summarization.
+ */
+suspend fun generateResponseWithSearch(
+    prompt: String,
+    modelName: String,
+    chatHistory: List<Message> = emptyList(),
+    customStyle: String = "",
+    fetchContent: Boolean = false
+): String = withContext(Dispatchers.IO) {
+    val model = getModel(modelName, customStyle)
+        ?: return@withContext "⚠️ API key not set."
+
+    try {
+        Log.d(TAG, "🔍 Search mode: fetching web data for: ${prompt.take(60)}...")
+
+        // Step 1: Get search results from HF Space
+        val searchResponse = WebSearchManager.searchForContext(prompt, fetchContent)
+
+        // Step 2: Build full prompt with search context
+        val contextBlock = buildContext(chatHistory, prompt)
+        val fullPrompt = buildString {
+            if (searchResponse.isNotBlank()) {
+                appendLine(searchResponse)
+                appendLine()
+                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
+                appendLine("📋 INSTRUCTIONS:")
+                appendLine("- Use the search results above to answer the user's question")
+                appendLine("- Cite sources using [Source: title](url) format")
+                appendLine("- If the search results are insufficient, use your own knowledge")
+                appendLine("- Be accurate and concise")
+                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
+                appendLine()
+                appendLine("User question: $prompt")
+            } else {
+                if (contextBlock.isNotBlank()) appendLine(contextBlock)
+                appendLine(prompt)
+            }
+        }
+
+        Log.d(TAG, "📤 Sending to Gemini (search-enriched prompt, ${fullPrompt.length} chars)")
+
+        // Step 3: Send to Gemini
+        val response = model.generateContent(content { text(fullPrompt) })
+        val rawText = response.text ?: "No response."
+
+        Log.d(TAG, "📥 Response received: ${rawText.take(100)}...")
+        rawText
+    } catch (e: Exception) {
+        Log.e(TAG, "❌ Search-powered generation failed", e)
+        handleApiError(e, modelName)
+    }
+}
+
+/**
+ * Hybrid generate — uses search if useSearch=true.
+ */
+suspend fun generateResponse(
+    prompt: String,
+    modelName: String,
+    chatHistory: List<Message> = emptyList(),
+    customStyle: String = "",
+    useSearch: Boolean = false
+): String {
+    return if (useSearch) {
+        generateResponseWithSearch(prompt, modelName, chatHistory, customStyle)
+    } else {
+        generateResponseBasic(prompt, modelName, chatHistory, customStyle)
+    }
+}
+
+// Rename the existing generateResponse to this:
+private suspend fun generateResponseBasic(
+    prompt: String,
+    modelName: String,
+    chatHistory: List<Message> = emptyList(),
+    customStyle: String = ""
+): String = withContext(Dispatchers.IO) {
+    val model = getModel(modelName, customStyle)
+        ?: return@withContext "⚠️ API key not set."
+
+    try {
+        val contextBlock = buildContext(chatHistory, prompt)
+        val response = model.generateContent(content {
+            if (contextBlock.isNotBlank()) text(contextBlock)
+            text(prompt)
+        })
+        response.text ?: "No response."
+    } catch (e: Exception) {
+        handleApiError(e, modelName)
+    }
+}
 
     // ──────────────────────────────────────────────
     // Context Builder — smart history compression

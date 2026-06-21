@@ -67,6 +67,22 @@ class ChatRepository(context: Context) {
         return File(messagesDir, "$conversationId.json")
     }
 
+    private fun saveMessageToFile(conversationId: String, message: Message) {
+        try {
+            val file = getMessagesFile(conversationId)
+            val arr = if (file.exists()) JSONArray(file.readText()) else JSONArray()
+            val obj = JSONObject()
+            obj.put("id", message.id)
+            obj.put("text", message.text)
+            obj.put("isUser", message.isUser)
+            obj.put("timestamp", message.timestamp)
+            arr.put(obj)
+            file.writeText(arr.toString())
+        } catch (e: Exception) {
+            Log.e("ChatRepo", "Failed to save message", e)
+        }
+    }
+
     fun getAllConversations(): Flow<List<Conversation>> = _conversations
 
     suspend fun getMessagesForConversationOnce(conversationId: String): List<Message> {
@@ -133,23 +149,19 @@ class ChatRepository(context: Context) {
             val messages = getMessagesForConversationOnce(conversationId)
             if (messages.size >= 2) {
                 val newTitle = generateTitle(messages.firstOrNull { it.isUser }?.text ?: text)
-                updateConversationTitle(conversationId, newTitle)
+                renameConversation(conversationId, newTitle)
             }
         }
     }
 
-    private fun updateConversationTitle(id: String, title: String) {
+    private fun renameConversation(id: String, newTitle: String) {
         val list = _conversations.value.toMutableList()
         val index = list.indexOfFirst { it.id == id }
         if (index >= 0) {
-            list[index] = list[index].copy(title = title)
+            list[index] = list[index].copy(title = newTitle)
             _conversations.value = list
             saveConversations()
         }
-    }
-
-    fun updateConversationTitle(conversationId: String, newTitle: String) {
-        updateConversationTitle(conversationId, newTitle)
     }
 
     private fun generateTitle(text: String): String {
@@ -174,12 +186,9 @@ class ChatRepository(context: Context) {
         if (query.isBlank()) return _conversations.value
         val q = query.lowercase()
         return _conversations.value.filter { conv ->
-            conv.title.lowercase().contains(q) || conv.id.lowercase().contains(q)
+            conv.title.lowercase().contains(q)
         }
     }
 
     fun getConversationCount(): Int = _conversations.value.size
-    fun getTotalMessageCount(): Int = messagesDir.listFiles()?.sumOf { file ->
-        try { JSONArray(file.readText()).length() } catch (e: Exception) { 0 }
-    } ?: 0
 }

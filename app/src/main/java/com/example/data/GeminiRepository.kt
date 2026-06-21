@@ -1,43 +1,39 @@
 package com.example.data
-import com.example.data.search.WebSearchManager
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
+import com.example.data.search.WebSearchManager
 import com.example.model.Message
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 
 class GeminiRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "GeminiRepo"
         private const val MAX_OUTPUT_TOKENS = 8192
-        private const val IMAGE_QUALITY = 80
+        private const val IMAGE_MAX_DIMENSION = 2048
         private const val MAX_FILE_CHARS = 4000
     }
 
     private val fullContextCount = 5
     private val embeddingManager = EmbeddingManager(context)
 
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
     // Model Factory
-    // ──────────────────────────────────────────────
-    private fun getModel(
-        modelName: String,
-        customStyle: String = ""
-    ): GenerativeModel? {
+    // ═══════════════════════════════════════════
+
+    private fun getModel(modelName: String, customStyle: String = ""): GenerativeModel? {
         val key = KeyManager.getGeminiKey(context)
         if (key.isNullOrBlank()) {
             Log.e(TAG, "❌ Gemini API key is null or empty")
             return null
         }
-
-        val systemPrompt = buildSystemPrompt(customStyle)
 
         return GenerativeModel(
             modelName = modelName,
@@ -48,7 +44,7 @@ class GeminiRepository(private val context: Context) {
                 topP = 0.95f
                 maxOutputTokens = MAX_OUTPUT_TOKENS
             },
-            systemInstruction = content { text(systemPrompt) }
+            systemInstruction = content { text(buildSystemPrompt(customStyle)) }
         )
     }
 
@@ -63,6 +59,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 - Be direct first, elaborate second. Answer the question, then explain.
 - Match your tone to the user's vibe — casual or professional.
 - Never sound robotic. Write like a brilliant friend.
+- When given web search results, cite sources using [Source: title](url) format.
 
 📝 FORMATTING:
 - Use **bold** for key terms only — 2-3 times max per response.
@@ -77,9 +74,7 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 - For inline code references, use single backticks: `functionName()`
 
 📊 DATA:
-- Use markdown tables when comparing things:
-  | Option | Pros | Cons |
-  |--------|------|------|
+- Use markdown tables when comparing things.
 - Add a blank line before and after tables.
 
 🧠 DEEP REASONING:
@@ -93,107 +88,14 @@ You are Zarp — a highly capable, warm, and intelligent AI assistant.
 - Use relevant emojis naturally (1-2 per paragraph max).
 - End with a helpful follow-up question or suggestion.
 - If unsure, say so clearly — never fabricate.
-- Keep responses comprehensive but not bloated.
             """.trimIndent()
         }
     }
-    /**
- * Generate response with web search context injected.
- * Uses HF Space for search, Gemini for intelligent summarization.
- */
-suspend fun generateResponseWithSearch(
-    prompt: String,
-    modelName: String,
-    chatHistory: List<Message> = emptyList(),
-    customStyle: String = "",
-    fetchContent: Boolean = false
-): String = withContext(Dispatchers.IO) {
-    val model = getModel(modelName, customStyle)
-        ?: return@withContext "⚠️ API key not set."
 
-    try {
-        Log.d(TAG, "🔍 Search mode: fetching web data for: ${prompt.take(60)}...")
+    // ═══════════════════════════════════════════
+    // Context Builder
+    // ═══════════════════════════════════════════
 
-        // Step 1: Get search results from HF Space
-        val searchResponse = WebSearchManager.searchForContext(prompt, fetchContent)
-
-        // Step 2: Build full prompt with search context
-        val contextBlock = buildContext(chatHistory, prompt)
-        val fullPrompt = buildString {
-            if (searchResponse.isNotBlank()) {
-                appendLine(searchResponse)
-                appendLine()
-                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
-                appendLine("📋 INSTRUCTIONS:")
-                appendLine("- Use the search results above to answer the user's question")
-                appendLine("- Cite sources using [Source: title](url) format")
-                appendLine("- If the search results are insufficient, use your own knowledge")
-                appendLine("- Be accurate and concise")
-                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
-                appendLine()
-                appendLine("User question: $prompt")
-            } else {
-                if (contextBlock.isNotBlank()) appendLine(contextBlock)
-                appendLine(prompt)
-            }
-        }
-
-        Log.d(TAG, "📤 Sending to Gemini (search-enriched prompt, ${fullPrompt.length} chars)")
-
-        // Step 3: Send to Gemini
-        val response = model.generateContent(content { text(fullPrompt) })
-        val rawText = response.text ?: "No response."
-
-        Log.d(TAG, "📥 Response received: ${rawText.take(100)}...")
-        rawText
-    } catch (e: Exception) {
-        Log.e(TAG, "❌ Search-powered generation failed", e)
-        handleApiError(e, modelName)
-    }
-}
-
-/**
- * Hybrid generate — uses search if useSearch=true.
- */
-suspend fun generateResponse(
-    prompt: String,
-    modelName: String,
-    chatHistory: List<Message> = emptyList(),
-    customStyle: String = "",
-    useSearch: Boolean = false
-): String {
-    return if (useSearch) {
-        generateResponseWithSearch(prompt, modelName, chatHistory, customStyle)
-    } else {
-        generateResponseBasic(prompt, modelName, chatHistory, customStyle)
-    }
-}
-
-// Rename the existing generateResponse to this:
-private suspend fun generateResponseBasic(
-    prompt: String,
-    modelName: String,
-    chatHistory: List<Message> = emptyList(),
-    customStyle: String = ""
-): String = withContext(Dispatchers.IO) {
-    val model = getModel(modelName, customStyle)
-        ?: return@withContext "⚠️ API key not set."
-
-    try {
-        val contextBlock = buildContext(chatHistory, prompt)
-        val response = model.generateContent(content {
-            if (contextBlock.isNotBlank()) text(contextBlock)
-            text(prompt)
-        })
-        response.text ?: "No response."
-    } catch (e: Exception) {
-        handleApiError(e, modelName)
-    }
-}
-
-    // ──────────────────────────────────────────────
-    // Context Builder — smart history compression
-    // ──────────────────────────────────────────────
     private suspend fun buildContext(history: List<Message>, currentPrompt: String): String {
         if (history.isEmpty()) return ""
 
@@ -201,14 +103,12 @@ private suspend fun generateResponseBasic(
         val relevantSet = relevant.toSet()
         val sb = StringBuilder()
 
-        // Last 5 messages — always full
         val recent = history.takeLast(fullContextCount)
         for (msg in recent) {
             val role = if (msg.isUser) "👤 User" else "🤖 Zarp"
             sb.appendLine("$role: ${msg.text}")
         }
 
-        // Embedding-matched older messages
         val olderRelevant = history.filter { it.text in relevantSet && it !in recent }
         if (olderRelevant.isNotEmpty()) {
             sb.appendLine()
@@ -221,18 +121,12 @@ private suspend fun generateResponseBasic(
             sb.appendLine()
         }
 
-        // Compressed summary of everything else
         val rest = history.filter { it !in recent && it !in olderRelevant }
         if (rest.isNotEmpty()) {
             val userTopics = rest.filter { it.isUser }
-                .map { it.text.take(60) }
-                .distinct()
-                .joinToString("; ")
+                .map { it.text.take(60) }.distinct().joinToString("; ")
             val aiTopics = rest.filter { !it.isUser }
-                .map { it.text.take(60) }
-                .distinct()
-                .joinToString("; ")
-
+                .map { it.text.take(60) }.distinct().joinToString("; ")
             if (userTopics.isNotBlank()) sb.appendLine("📋 User asked: $userTopics")
             if (aiTopics.isNotBlank()) sb.appendLine("💬 Zarp answered: $aiTopics")
         }
@@ -240,60 +134,119 @@ private suspend fun generateResponseBasic(
         return sb.toString().trim()
     }
 
-    // ──────────────────────────────────────────────
-    // Generate Text Response
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    // Public: Generate Response
+    // ═══════════════════════════════════════════
+
     suspend fun generateResponse(
         prompt: String,
         modelName: String,
         chatHistory: List<Message> = emptyList(),
         customStyle: String = "",
         useSearch: Boolean = false
+    ): String {
+        return if (useSearch) {
+            generateWithSearch(prompt, modelName, chatHistory, customStyle)
+        } else {
+            generateBasic(prompt, modelName, chatHistory, customStyle)
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // Private: Basic Generation
+    // ═══════════════════════════════════════════
+
+    private suspend fun generateBasic(
+        prompt: String,
+        modelName: String,
+        chatHistory: List<Message>,
+        customStyle: String
     ): String = withContext(Dispatchers.IO) {
         val model = getModel(modelName, customStyle)
-        if (model == null) {
-            return@withContext "⚠️ **API key not set.**\nGo to Settings → API Keys to add your Gemini key."
-        }
+            ?: return@withContext "⚠️ **API key not set.**\nGo to Settings → API Keys to add your Gemini key."
 
         try {
-            val finalPrompt = if (useSearch) {
-                "🔍 *Web Search Mode active.* Use your most current knowledge. $prompt"
-            } else {
-                prompt
-            }
+            val contextBlock = buildContext(chatHistory, prompt)
+            Log.d(TAG, "📤 $modelName | ${chatHistory.size} msg history | ${prompt.take(60)}...")
 
-            Log.d(TAG, "📤 Sending to $modelName | Search: $useSearch | History: ${chatHistory.size} msgs")
-            val contextBlock = buildContext(chatHistory, finalPrompt)
-
-            val response = model.generateContent(
-                content {
-                    if (contextBlock.isNotBlank()) text(contextBlock)
-                    text(finalPrompt)
-                }
-            )
+            val response = model.generateContent(content {
+                if (contextBlock.isNotBlank()) text(contextBlock)
+                text(prompt)
+            })
 
             val rawText = response.text
             if (rawText.isNullOrBlank()) {
-                Log.w(TAG, "Empty response from $modelName")
+                Log.w(TAG, "⚠️ Empty response from $modelName")
                 return@withContext "⚠️ I couldn't generate a response. Please try again."
             }
 
             Log.d(TAG, "📥 Response: ${rawText.take(100)}...")
-
-            if (useSearch) {
-                "$rawText\n\n---\n🌐 *Web knowledge accessed — verify critical info from official sources.*"
-            } else {
-                rawText
-            }
+            rawText
         } catch (e: Exception) {
             Log.e(TAG, "❌ $modelName failed: ${e.localizedMessage}", e)
             handleApiError(e, modelName)
         }
     }
 
-    // ──────────────────────────────────────────────
-    // Generate Image Response
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    // Private: Search-Powered Generation
+    // ═══════════════════════════════════════════
+
+    private suspend fun generateWithSearch(
+        prompt: String,
+        modelName: String,
+        chatHistory: List<Message>,
+        customStyle: String
+    ): String = withContext(Dispatchers.IO) {
+        val model = getModel(modelName, customStyle)
+            ?: return@withContext "⚠️ **API key not set.**"
+
+        try {
+            Log.d(TAG, "🔍 Search mode: fetching web data for: ${prompt.take(60)}...")
+
+            val searchContext = WebSearchManager.searchForContext(
+                query = prompt,
+                context = context,
+                fetchContent = false
+            )
+
+            val historyBlock = buildContext(chatHistory, prompt)
+            val fullPrompt = buildString {
+                if (searchContext.isNotBlank()) {
+                    appendLine(searchContext)
+                    appendLine()
+                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    appendLine("📋 INSTRUCTIONS:")
+                    appendLine("- Use the search results above to answer accurately")
+                    appendLine("- Cite sources using [Source: title](url) format")
+                    appendLine("- If results are insufficient, use your own knowledge")
+                    appendLine("- Be concise but thorough")
+                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    appendLine()
+                }
+                if (historyBlock.isNotBlank()) {
+                    appendLine(historyBlock)
+                    appendLine()
+                }
+                appendLine("User: $prompt")
+            }
+
+            Log.d(TAG, "📤 Search-enriched prompt (${fullPrompt.length} chars)")
+            val response = model.generateContent(content { text(fullPrompt) })
+
+            val rawText = response.text ?: "No response."
+            Log.d(TAG, "📥 Search response: ${rawText.take(100)}...")
+            rawText
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Search generation failed", e)
+            handleApiError(e, modelName)
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // Image Generation
+    // ═══════════════════════════════════════════
+
     suspend fun generateResponseWithImage(
         prompt: String,
         imageUri: Uri,
@@ -302,9 +255,7 @@ private suspend fun generateResponseBasic(
         customStyle: String = ""
     ): String = withContext(Dispatchers.IO) {
         val model = getModel(modelName, customStyle)
-        if (model == null) {
-            return@withContext "⚠️ **API key not set.**"
-        }
+            ?: return@withContext "⚠️ **API key not set.**"
 
         try {
             Log.d(TAG, "📸 Processing image with $modelName")
@@ -320,15 +271,9 @@ private suspend fun generateResponseBasic(
                 return@withContext "❌ Unsupported image format. Try JPEG or PNG."
             }
 
-            // Compress large images
-            val processedBitmap = if (bitmap.width > 2048 || bitmap.height > 2048) {
-                val ratio = minOf(2048f / bitmap.width, 2048f / bitmap.height)
-                Bitmap.createScaledBitmap(
-                    bitmap,
-                    (bitmap.width * ratio).toInt(),
-                    (bitmap.height * ratio).toInt(),
-                    true
-                )
+            val processedBitmap = if (bitmap.width > IMAGE_MAX_DIMENSION || bitmap.height > IMAGE_MAX_DIMENSION) {
+                val ratio = minOf(IMAGE_MAX_DIMENSION.toFloat() / bitmap.width, IMAGE_MAX_DIMENSION.toFloat() / bitmap.height)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
             } else bitmap
 
             val shortHistory = chatHistory.takeLast(3)
@@ -339,34 +284,26 @@ private suspend fun generateResponseBasic(
                 "📋 Earlier: $u → 💬 $a"
             } else ""
 
-            val response = model.generateContent(
-                content {
-                    if (summary.isNotBlank()) text(summary)
-                    shortHistory.forEach { msg ->
-                        if (msg.isUser) text("👤 ${msg.text}")
-                        else text("🤖 ${msg.text}")
-                    }
-                    image(processedBitmap)
-                    text(prompt.ifBlank { "Describe this image in detail. What do you see? Provide useful observations." })
+            val response = model.generateContent(content {
+                if (summary.isNotBlank()) text(summary)
+                shortHistory.forEach { msg ->
+                    if (msg.isUser) text("👤 ${msg.text}") else text("🤖 ${msg.text}")
                 }
-            )
+                image(processedBitmap)
+                text(prompt.ifBlank { "Describe this image in detail. What do you see?" })
+            })
 
-            val rawText = response.text
-            if (rawText.isNullOrBlank()) {
-                return@withContext "⚠️ I couldn't analyze the image. Try a clearer photo."
-            }
-
-            Log.d(TAG, "📥 Image analysis: ${rawText.take(100)}...")
-            rawText
+            response.text ?: "⚠️ I couldn't analyze the image."
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Image processing failed: ${e.localizedMessage}", e)
+            Log.e(TAG, "❌ Image processing failed", e)
             handleApiError(e, modelName)
         }
     }
 
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
     // Translation
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+
     suspend fun translate(text: String, targetLang: String): String = withContext(Dispatchers.IO) {
         val key = KeyManager.getGeminiKey(context) ?: return@withContext "⚠️ API key not set."
         val model = GenerativeModel(
@@ -378,47 +315,39 @@ private suspend fun generateResponseBasic(
             }
         )
         try {
-            val response = model.generateContent(
-                content {
-                    text("Translate this exactly to $targetLang. Return ONLY the translation, no explanations.\n\n$text")
-                }
-            )
+            val response = model.generateContent(content {
+                text("Translate this exactly to $targetLang. Return ONLY the translation.\n\n$text")
+            })
             response.text ?: "Translation failed."
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Translation failed", e)
-            "⚠️ Translation unavailable right now."
+            "⚠️ Translation unavailable."
         }
     }
 
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
     // Embedding Storage
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+
     suspend fun storeMessageEmbedding(text: String) {
         if (text.isNotBlank()) {
             embeddingManager.embedAndStore(text)
         }
     }
 
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
     // Error Handler
-    // ──────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+
     private fun handleApiError(e: Exception, modelName: String): String {
         val msg = e.localizedMessage ?: ""
         return when {
-            msg.contains("403") ->
-                "🔒 **Model unavailable**\n`$modelName` is not accessible on your plan.\n→ *Switch to Gemini 2.5 Flash in the model selector.*"
-            msg.contains("404") ->
-                "🔍 **Model not found**\n`$modelName` doesn't exist or was removed.\n→ *Choose a different model.*"
-            msg.contains("429") ->
-                "⏳ **Rate limit reached**\nToo many requests. Please wait 30 seconds."
-            msg.contains("503") || msg.contains("timeout", true) ->
-                "⏰ **Service busy**\nThe model is overloaded. Try again in a moment."
-            msg.contains("MAX_TOKENS") ->
-                "📏 **Response too long**\nTry a shorter question or split into parts."
-            msg.contains("SAFETY") || msg.contains("blocked") ->
-                "🛡️ **Content blocked**\nThe response was filtered by safety settings."
-            else ->
-                "❌ **Unexpected error**\n`${e.localizedMessage ?: "Unknown"}`\n→ *Try Gemini 2.5 Flash if this persists.*"
+            msg.contains("403") -> "🔒 **Model unavailable**\n`$modelName` is not accessible on your plan.\n→ Switch to Gemini 2.5 Flash."
+            msg.contains("404") -> "🔍 **Model not found**\n`$modelName` doesn't exist."
+            msg.contains("429") -> "⏳ **Rate limit reached**\nPlease wait 30 seconds."
+            msg.contains("503") || msg.contains("timeout", true) -> "⏰ **Service busy**\nTry again in a moment."
+            msg.contains("MAX_TOKENS") -> "📏 **Response too long**\nTry a shorter question."
+            msg.contains("SAFETY") || msg.contains("blocked") -> "🛡️ **Content blocked** by safety filters."
+            else -> "❌ **Error:** ${e.localizedMessage ?: "Unknown"}"
         }
     }
 }

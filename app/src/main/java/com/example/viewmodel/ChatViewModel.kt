@@ -52,7 +52,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val showTranslateDialog: Boolean = false,
         val likedMessages: Set<String> = emptySet(),
         val dislikedMessages: Set<String> = emptySet(),
-        // Agent state
         val agentProgress: AgentLoopManager.AgentProgress? = null,
         val agentTaskResult: AgentLoopManager.AgentResult? = null
     )
@@ -82,15 +81,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val geminiRepository = GeminiRepository(application)
     private val androidTTS = AndroidTTSManager(application)
 
-    // Agent mode managers (lazy init)
     private val codeExecutionManager by lazy {
         CodeExecutionManager(KeyManager.getGeminiKey(application) ?: "")
     }
+
     private val gitHubAgent by lazy {
         GitHubAgent(KeyManager.getGithubKey(application) ?: "")
     }
+
     private val agentLoopManager by lazy {
-        AgentLoopManager(geminiRepository, codeExecutionManager, gitHubAgent)
+        AgentLoopManager(
+            geminiRepository = geminiRepository,
+            codeExecutionManager = codeExecutionManager,
+            gitHubAgent = gitHubAgent,
+            context = application
+        )
     }
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -106,10 +111,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // File Helpers
-    // ═══════════════════════════════════════════
-
     private fun getFileType(uri: Uri): String {
         val mime = getApplication<Application>().contentResolver.getType(uri) ?: return "📎"
         return when {
@@ -123,30 +124,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Input / Toggle
-    // ═══════════════════════════════════════════
-
     fun onInputChanged(text: String) { _uiState.value = _uiState.value.copy(inputText = text) }
     fun onToggleTranslateMode() { _uiState.value = _uiState.value.copy(isTranslateMode = !_uiState.value.isTranslateMode) }
     fun onToggleSearchMode() { _uiState.value = _uiState.value.copy(isSearchMode = !_uiState.value.isSearchMode) }
     fun onToggleAgentMode() { _uiState.value = _uiState.value.copy(isAgentMode = !_uiState.value.isAgentMode) }
 
-    // ═══════════════════════════════════════════
-    // Send Message (Chat + Agent)
-    // ═══════════════════════════════════════════
-
     fun onSend() {
-        if (_uiState.value.isAgentMode) {
-            onSendAgent()
-        } else {
-            onSendChat()
-        }
+        if (_uiState.value.isAgentMode) onSendAgent() else onSendChat()
     }
-
-    // ═══════════════════════════════════════════
-    // Chat Mode Send
-    // ═══════════════════════════════════════════
 
     private fun onSendChat() {
         var currentText = _uiState.value.inputText.ifBlank { lastUserPrompt }
@@ -174,10 +159,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value.messages
         }
 
-        _uiState.value = _uiState.value.copy(
-            inputText = "", isAiThinking = true, isPaused = false,
-            selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList()
-        )
+        _uiState.value = _uiState.value.copy(inputText = "", isAiThinking = true, isPaused = false, selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList())
 
         currentGenerationJob = viewModelScope.launch {
             try {
@@ -201,10 +183,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Agent Mode Send
-    // ═══════════════════════════════════════════
-
     private fun onSendAgent() {
         val currentText = _uiState.value.inputText.ifBlank { lastUserPrompt }
         if (currentText.isBlank()) return
@@ -212,46 +190,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastUserPrompt = currentText
         val userMessage = Message(UUID.randomUUID().toString(), "🤖 Agent: $currentText", true, System.currentTimeMillis())
 
-        _uiState.value = _uiState.value.copy(
-            messages = _uiState.value.messages + userMessage,
-            inputText = "",
-            isAiThinking = true,
-            isPaused = false,
-            agentProgress = null,
-            agentTaskResult = null
-        )
+        _uiState.value = _uiState.value.copy(messages = _uiState.value.messages + userMessage, inputText = "", isAiThinking = true, isPaused = false, agentProgress = null, agentTaskResult = null)
 
         currentGenerationJob = viewModelScope.launch {
             try {
-                val result = agentLoopManager.executeAgentTask(
-                    userRequest = currentText,
-                    chatHistory = _uiState.value.messages.dropLast(1)
-                ) { progress ->
+                val task = agentLoopManager.executeAgentTask(userRequest = currentText, chatHistory = _uiState.value.messages.dropLast(1)) { progress ->
                     _uiState.value = _uiState.value.copy(agentProgress = progress)
                 }
-
-                val responseText = result.result?.summary ?: "Agent task completed."
+                val responseText = task.result?.summary ?: "Agent task completed."
                 val aiMessage = Message(UUID.randomUUID().toString(), responseText, false, System.currentTimeMillis())
-
-                _uiState.value = _uiState.value.copy(
-                    messages = _uiState.value.messages + aiMessage,
-                    isAiThinking = false,
-                    agentTaskResult = result.result
-                )
+                _uiState.value = _uiState.value.copy(messages = _uiState.value.messages + aiMessage, isAiThinking = false, agentTaskResult = task.result)
                 lastUserPrompt = ""
-            } catch (e: CancellationException) {
-                _uiState.value = _uiState.value.copy(isAiThinking = false)
-                throw e
-            } catch (e: Exception) {
-                Log.e("ChatVM", "Agent failed", e)
-                _uiState.value = _uiState.value.copy(isAiThinking = false)
-            }
+            } catch (e: CancellationException) { _uiState.value = _uiState.value.copy(isAiThinking = false); throw e }
+            catch (e: Exception) { Log.e("ChatVM", "Agent failed", e); _uiState.value = _uiState.value.copy(isAiThinking = false) }
         }
     }
-
-    // ═══════════════════════════════════════════
-    // Helpers
-    // ═══════════════════════════════════════════
 
     fun onRegenerate() { if (lastUserPrompt.isBlank()) _uiState.value.messages.findLast { it.isUser }?.let { lastUserPrompt = it.text }; if (lastUserPrompt.isNotBlank()) { _uiState.value = _uiState.value.copy(inputText = ""); onSend() } }
     private fun readFileContent(uri: Uri): String = try { getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.readText()?.take(4000) ?: "" } catch (e: Exception) { "" }

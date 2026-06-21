@@ -94,7 +94,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── File type detection ──
     private fun getFileType(uri: Uri): String {
         val mime = getApplication<Application>().contentResolver.getType(uri) ?: return "📎"
         return when {
@@ -122,13 +121,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun onSend() {
         var currentText = _uiState.value.inputText.ifBlank { lastUserPrompt }
         val imageUris = _uiState.value.selectedImageUris.ifEmpty { lastImageUris }
-        var conversationId = _uiState.value.currentConversationId
+        var conversationId: String? = _uiState.value.currentConversationId
         val isTranslateMode = _uiState.value.isTranslateMode
         val isRegenerate = _uiState.value.inputText.isBlank() && lastUserPrompt.isNotBlank()
 
         if (currentText.isBlank() && imageUris.isEmpty()) return
 
-        // Store for regenerate
         if (!isRegenerate) {
             lastUserPrompt = currentText
             lastImageUris = imageUris
@@ -145,7 +143,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else -> return
         }
 
-        // Only add user message if not regenerating
         val currentMessages = if (!isRegenerate) {
             val userMessage = Message(
                 id = UUID.randomUUID().toString(),
@@ -157,7 +154,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value = _uiState.value.copy(messages = updated)
             updated
         } else {
-            // Remove the last AI message before regenerating
             val withoutLastAi = _uiState.value.messages.dropLastWhile { !it.isUser }
             _uiState.value = _uiState.value.copy(messages = withoutLastAi)
             withoutLastAi
@@ -178,12 +174,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     currentText = geminiRepository.translate(currentText, "English")
                 }
 
-                if (conversationId == null && !isRegenerate) {
+                val safeConversationId = if (conversationId == null && !isRegenerate) {
                     val newConv = chatRepository.createNewConversation(displayText)
                     conversationId = newConv.id
                     _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
-                } else if (!isRegenerate) {
-                    chatRepository.addMessageToConversation(conversationId, displayText, true)
+                    conversationId
+                } else {
+                    if (!isRegenerate && conversationId != null) {
+                        chatRepository.addMessageToConversation(conversationId, displayText, true)
+                    }
+                    conversationId ?: ""
                 }
 
                 val history = currentMessages.dropLast(1)
@@ -213,8 +213,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)
-                val convId = conversationId ?: ""
-                   chatRepository.addMessageToConversation(convId, responseText, false)
+                chatRepository.addMessageToConversation(safeConversationId, responseText, false)
 
                 viewModelScope.launch {
                     geminiRepository.storeMessageEmbedding(responseText)
@@ -250,10 +249,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Regenerate ──
     fun onRegenerate() {
         if (lastUserPrompt.isBlank() && _uiState.value.selectedImageUris.isEmpty()) {
-            // Find the last user message
             val lastUserMsg = _uiState.value.messages.findLast { it.isUser }
             if (lastUserMsg != null) {
                 lastUserPrompt = lastUserMsg.text
@@ -341,7 +338,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val msgs = chatRepository.getMessagesForConversationOnce(id)
                 Log.d("ChatVM", "📂 Loaded ${msgs.size} messages for $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
-                // Update last prompt for regenerate
                 msgs.findLast { it.isUser }?.let { lastUserPrompt = it.text }
             } catch (e: Exception) { Log.e("ChatVM", "Failed to load conversation $id", e) }
         }

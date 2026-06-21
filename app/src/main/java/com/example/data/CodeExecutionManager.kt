@@ -211,7 +211,7 @@ class CodeExecutionManager(private val apiKey: String) {
     // Auto-Fix Loop: review -> fix -> re-review
     // ═══════════════════════════════════════════
 
-    suspend fun autoFixCode(
+    suspend fun autoFixAndValidate(
         code: String,
         language: String = "python",
         modelName: String = EXEC_MODEL,

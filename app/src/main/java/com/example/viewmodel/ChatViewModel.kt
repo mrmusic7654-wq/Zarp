@@ -1,17 +1,18 @@
 package com.example.viewmodel
-import com.example.data.AndroidTTSManager
+
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.speech.RecognizerIntent
 import android.util.Log
+import android.webkit.MimeTypeMap
 import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.AndroidTTSManager
 import com.example.data.ChatRepository
 import com.example.data.GeminiRepository
 import com.example.data.UsageTracker
-import com.example.data.local.ChatDatabase
 import com.example.model.Conversation
 import com.example.model.Message
 import kotlinx.coroutines.*
@@ -32,6 +33,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val showAttachmentSheet: Boolean = false,
         val selectedImageUris: List<Uri> = emptyList(),
         val selectedFileNames: List<String> = emptyList(),
+        val selectedFileTypes: List<String> = emptyList(),
         val selectedModel: String = "Gemini 2.5 Flash",
         val customStyle: String = "",
         val showStyleDialog: Boolean = false,
@@ -74,8 +76,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val database = ChatDatabase.getInstance(application)
-    private val chatRepository = ChatRepository(database)
+    private val chatRepository = ChatRepository(application)
     private val geminiRepository = GeminiRepository(application)
     private val androidTTS = AndroidTTSManager(application)
 
@@ -91,6 +92,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             chatRepository.getAllConversations().collect { conversations ->
                 _uiState.value = _uiState.value.copy(conversations = conversations)
             }
+        }
+    }
+
+    // ── File type detection ──
+    private fun getFileType(uri: Uri): String {
+        val mime = getApplication<Application>().contentResolver.getType(uri) ?: return "📎"
+        return when {
+            mime.startsWith("image/") -> "🖼️"
+            mime.startsWith("video/") -> "🎬"
+            mime.startsWith("audio/") -> "🎵"
+            mime.contains("pdf") -> "📕"
+            mime.contains("zip") || mime.contains("rar") || mime.contains("tar") || mime.contains("gzip") -> "📦"
+            mime.contains("text/") || mime.contains("kotlin") || mime.contains("java") || mime.contains("python") -> "💻"
+            mime.contains("word") || mime.contains("document") -> "📝"
+            mime.contains("excel") || mime.contains("sheet") -> "📊"
+            mime.contains("powerpoint") || mime.contains("presentation") -> "📽️"
+            else -> "📎"
         }
     }
 
@@ -113,10 +131,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         lastPrompt = currentText
         lastImageUris = imageUris
 
+        val fileDescriptions = _uiState.value.selectedFileNames.zip(_uiState.value.selectedFileTypes).map { (name, type) ->
+            "$type $name"
+        }
+
         val displayText = when {
-            currentText.isNotBlank() && imageUris.isNotEmpty() -> "$currentText\n📎 ${imageUris.size} file(s) attached"
+            currentText.isNotBlank() && imageUris.isNotEmpty() -> "$currentText\n📎 Attached: ${fileDescriptions.joinToString(", ")}"
             currentText.isNotBlank() -> currentText
-            imageUris.isNotEmpty() -> "📎 ${imageUris.size} file(s) attached"
+            imageUris.isNotEmpty() -> "📎 Attached: ${fileDescriptions.joinToString(", ")}"
             else -> return
         }
 
@@ -134,7 +156,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             isAiThinking = true,
             isPaused = false,
             selectedImageUris = emptyList(),
-            selectedFileNames = emptyList()
+            selectedFileNames = emptyList(),
+            selectedFileTypes = emptyList()
         )
 
         currentGenerationJob = viewModelScope.launch {
@@ -154,14 +177,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val history = currentMessages.dropLast(1)
                 val modelName = getModelApiName(_uiState.value.selectedModel)
 
-                var responseText = if (imageUris.isNotEmpty()) {
+                val firstUri = imageUris.firstOrNull()
+                val isImage = firstUri?.let { uri ->
+                    getApplication<Application>().contentResolver.getType(uri)?.startsWith("image/") == true
+                } ?: false
+
+                var responseText = if (isImage && firstUri != null) {
                     geminiRepository.generateResponseWithImage(
-                        currentText, imageUris.first(), modelName, history, _uiState.value.customStyle
+                        currentText, firstUri, modelName, history, _uiState.value.customStyle
                     )
                 } else {
-                    geminiRepository.generateResponse(
-                        currentText, modelName, history, _uiState.value.customStyle
-                    )
+                    val fileContent = if (firstUri != null && !isImage) {
+                        readFileContent(firstUri)
+                    } else ""
+                    val fullPrompt = if (fileContent.isNotBlank()) {
+                        "$currentText\n\n[File content from ${fileDescriptions.firstOrNull() ?: "attached file"}]:\n$fileContent"
+                    } else currentText
+                    geminiRepository.generateResponse(fullPrompt, modelName, history, _uiState.value.customStyle)
                 }
 
                 if (isTranslateMode) {
@@ -207,36 +239,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onPauseGeneration() {
-        currentGenerationJob?.cancel()
-        currentGenerationJob = null
-        _uiState.value = _uiState.value.copy(isPaused = true, isAiThinking = false)
+    private fun readFileContent(uri: Uri): String {
+        return try {
+            getApplication<Application>().contentResolver.openInputStream(uri)
+                ?.bufferedReader()?.readText()?.take(4000) ?: ""
+        } catch (e: Exception) { "" }
     }
 
-    fun onResumeGeneration() {
-        if (_uiState.value.isPaused) {
-            _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = true)
-            onSend()
-        }
-    }
+    fun onPauseGeneration() { currentGenerationJob?.cancel(); currentGenerationJob = null; _uiState.value = _uiState.value.copy(isPaused = true, isAiThinking = false) }
+    fun onResumeGeneration() { if (_uiState.value.isPaused) { _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = true); onSend() } }
+    fun onStopGeneration() { currentGenerationJob?.cancel(); currentGenerationJob = null; _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = false); lastPrompt = ""; lastImageUris = emptyList() }
 
-    fun onStopGeneration() {
-        currentGenerationJob?.cancel()
-        currentGenerationJob = null
-        _uiState.value = _uiState.value.copy(isPaused = false, isAiThinking = false)
-        lastPrompt = ""
-        lastImageUris = emptyList()
-    }
-
-    // Voice
-    fun onVoiceResult(text: String) {
-        _uiState.value = _uiState.value.copy(inputText = text, isListening = false)
-        if (text.isNotBlank()) onSend()
-    }
-
-    fun onCancelVoice() {
-        _uiState.value = _uiState.value.copy(isListening = false)
-    }
+    fun onVoiceResult(text: String) { _uiState.value = _uiState.value.copy(inputText = text, isListening = false); if (text.isNotBlank()) onSend() }
+    fun onCancelVoice() { _uiState.value = _uiState.value.copy(isListening = false) }
 
     fun onStartVoiceInput(launcher: ActivityResultLauncher<Intent>) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -244,182 +259,99 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-        try {
-            _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
-            launcher.launch(intent)
-        } catch (e: Exception) {
-            onCancelVoice()
-        }
+        try { _uiState.value = _uiState.value.copy(isListening = true, inputText = ""); launcher.launch(intent) }
+        catch (e: Exception) { onCancelVoice() }
     }
 
-    // Android TTS speak
     fun onSpeakMessage(messageId: String, text: String) {
-        if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) {
-            onStopSpeaking()
-            return
-        }
+        if (_uiState.value.isSpeaking && _uiState.value.speakingMessageId == messageId) { onStopSpeaking(); return }
         _uiState.value = _uiState.value.copy(isSpeaking = true, speakingMessageId = messageId)
-        androidTTS.speak(text) {
-            _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
-        }
+        androidTTS.speak(text) { _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null) }
     }
 
-    fun onStopSpeaking() {
-        androidTTS.stop()
-        _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null)
-    }
+    fun onStopSpeaking() { androidTTS.stop(); _uiState.value = _uiState.value.copy(isSpeaking = false, speakingMessageId = null) }
 
-    // Like / Dislike
     fun onLikeMessage(messageId: String) {
         val liked = _uiState.value.likedMessages.toMutableSet()
         val disliked = _uiState.value.dislikedMessages.toMutableSet()
-        if (messageId in liked) {
-            liked.remove(messageId)
-        } else {
-            liked.add(messageId)
-            disliked.remove(messageId)
-        }
+        if (messageId in liked) liked.remove(messageId) else { liked.add(messageId); disliked.remove(messageId) }
         _uiState.value = _uiState.value.copy(likedMessages = liked, dislikedMessages = disliked)
     }
 
     fun onDislikeMessage(messageId: String) {
         val liked = _uiState.value.likedMessages.toMutableSet()
         val disliked = _uiState.value.dislikedMessages.toMutableSet()
-        if (messageId in disliked) {
-            disliked.remove(messageId)
-        } else {
-            disliked.add(messageId)
-            liked.remove(messageId)
-        }
+        if (messageId in disliked) disliked.remove(messageId) else { disliked.add(messageId); liked.remove(messageId) }
         _uiState.value = _uiState.value.copy(likedMessages = liked, dislikedMessages = disliked)
     }
 
-    // Translate
     fun onTranslateMessage(messageId: String, text: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isTranslating = true)
             val translated = geminiRepository.translate(text, _uiState.value.translateLanguage)
-            _uiState.value = _uiState.value.copy(
-                translateResult = translated,
-                showTranslateDialog = true,
-                isTranslating = false
-            )
+            _uiState.value = _uiState.value.copy(translateResult = translated, showTranslateDialog = true, isTranslating = false)
         }
     }
 
-    fun onDismissTranslateDialog() {
-        _uiState.value = _uiState.value.copy(showTranslateDialog = false, translateResult = null)
-    }
+    fun onDismissTranslateDialog() { _uiState.value = _uiState.value.copy(showTranslateDialog = false, translateResult = null) }
+    fun onUpdateTranslateLanguage(lang: String) { _uiState.value = _uiState.value.copy(translateLanguage = lang) }
 
-    fun onUpdateTranslateLanguage(lang: String) {
-        _uiState.value = _uiState.value.copy(translateLanguage = lang)
-    }
-
-    // Chat history
     fun onNewChat() {
-        currentGenerationJob?.cancel()
-        currentGenerationJob = null
-        lastPrompt = ""
-        lastImageUris = emptyList()
+        currentGenerationJob?.cancel(); currentGenerationJob = null
+        lastPrompt = ""; lastImageUris = emptyList()
         _uiState.value = _uiState.value.copy(
-            messages = emptyList(),
-            currentConversationId = null,
-            isDrawerOpen = false,
-            inputText = "",
-            selectedImageUris = emptyList(),
-            selectedFileNames = emptyList(),
-            isAiThinking = false,
-            isPaused = false
+            messages = emptyList(), currentConversationId = null, isDrawerOpen = false,
+            inputText = "", selectedImageUris = emptyList(), selectedFileNames = emptyList(),
+            selectedFileTypes = emptyList(), isAiThinking = false, isPaused = false
         )
     }
 
     fun onSelectConversation(id: String) {
-        currentGenerationJob?.cancel()
-        currentGenerationJob = null
-        lastPrompt = ""
-        lastImageUris = emptyList()
-        _uiState.value = _uiState.value.copy(
-            currentConversationId = id,
-            isDrawerOpen = false,
-            isAiThinking = false,
-            isPaused = false,
-            messages = emptyList()
-        )
+        currentGenerationJob?.cancel(); currentGenerationJob = null
+        lastPrompt = ""; lastImageUris = emptyList()
+        _uiState.value = _uiState.value.copy(currentConversationId = id, isDrawerOpen = false, isAiThinking = false, isPaused = false, messages = emptyList())
         viewModelScope.launch {
             try {
                 val msgs = chatRepository.getMessagesForConversationOnce(id)
                 Log.d("ChatVM", "📂 Loaded ${msgs.size} messages for $id")
                 _uiState.value = _uiState.value.copy(messages = msgs)
-            } catch (e: Exception) {
-                Log.e("ChatVM", "Failed to load conversation $id", e)
-            }
+            } catch (e: Exception) { Log.e("ChatVM", "Failed to load conversation $id", e) }
         }
     }
 
     fun onDeleteConversation(id: String) {
-        viewModelScope.launch {
-            chatRepository.deleteConversation(id)
-            if (_uiState.value.currentConversationId == id) onNewChat()
-        }
+        viewModelScope.launch { chatRepository.deleteConversation(id); if (_uiState.value.currentConversationId == id) onNewChat() }
     }
 
-    // Attachments
     fun onAttachmentTap() { _uiState.value = _uiState.value.copy(showAttachmentSheet = true) }
     fun dismissAttachmentSheet() { _uiState.value = _uiState.value.copy(showAttachmentSheet = false) }
 
-    fun onImageSelected(uri: Uri) {
-        val currentUris = _uiState.value.selectedImageUris.toMutableList()
-        val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        currentUris.add(uri)
-        currentNames.add(uri.lastPathSegment ?: "File ${currentUris.size}")
-        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
-    }
+    fun onImageSelected(uri: Uri) { addAttachment(uri, uri.lastPathSegment ?: "File") }
+    fun onImagesSelected(uris: List<Uri>) { uris.forEach { addAttachment(it, it.lastPathSegment ?: "File") } }
+    fun onFileSelected(uri: Uri, name: String) { addAttachment(uri, name) }
+    fun onFilesSelected(uris: List<Uri>) { uris.forEach { addAttachment(it, it.lastPathSegment ?: "File") } }
 
-    fun onImagesSelected(uris: List<Uri>) {
+    private fun addAttachment(uri: Uri, name: String) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        uris.forEach { uri ->
-            currentUris.add(uri)
-            currentNames.add(uri.lastPathSegment ?: "File ${currentUris.size}")
-        }
-        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
-    }
-
-    fun onFileSelected(uri: Uri, name: String) {
-        val currentUris = _uiState.value.selectedImageUris.toMutableList()
-        val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        currentUris.add(uri)
-        currentNames.add(name)
-        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
-    }
-
-    fun onFilesSelected(uris: List<Uri>) {
-        val currentUris = _uiState.value.selectedImageUris.toMutableList()
-        val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        uris.forEach { uri ->
-            currentUris.add(uri)
-            currentNames.add(uri.lastPathSegment ?: "File ${currentUris.size}")
-        }
-        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
+        val currentTypes = _uiState.value.selectedFileTypes.toMutableList()
+        currentUris.add(uri); currentNames.add(name); currentTypes.add(getFileType(uri))
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames, selectedFileTypes = currentTypes)
     }
 
     fun removeSingleAttachment(index: Int) {
         val currentUris = _uiState.value.selectedImageUris.toMutableList()
         val currentNames = _uiState.value.selectedFileNames.toMutableList()
-        if (index in currentUris.indices) { currentUris.removeAt(index); currentNames.removeAt(index) }
-        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames)
+        val currentTypes = _uiState.value.selectedFileTypes.toMutableList()
+        if (index in currentUris.indices) { currentUris.removeAt(index); currentNames.removeAt(index); currentTypes.removeAt(index) }
+        _uiState.value = _uiState.value.copy(selectedImageUris = currentUris, selectedFileNames = currentNames, selectedFileTypes = currentTypes)
     }
 
-    fun clearImageSelection() {
-        _uiState.value = _uiState.value.copy(selectedImageUris = emptyList(), selectedFileNames = emptyList())
-    }
+    fun clearImageSelection() { _uiState.value = _uiState.value.copy(selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList()) }
 
     fun onMicTap() {
         _uiState.value = _uiState.value.copy(isListening = true, inputText = "")
-        viewModelScope.launch {
-            delay(2000)
-            _uiState.value = _uiState.value.copy(isListening = false, inputText = "What's the weather today?")
-        }
+        viewModelScope.launch { delay(2000); _uiState.value = _uiState.value.copy(isListening = false, inputText = "What's the weather today?") }
     }
 
     fun onToggleDrawer(isOpen: Boolean) { _uiState.value = _uiState.value.copy(isDrawerOpen = isOpen) }

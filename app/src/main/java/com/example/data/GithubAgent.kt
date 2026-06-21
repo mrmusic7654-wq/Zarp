@@ -60,6 +60,14 @@ class GitHubAgent(private val githubToken: String) {
         val url: String,
         val state: String
     )
+    suspend fun getAuthenticatedUsername(): String? = withContext(Dispatchers.IO) {
+    try {
+        val request = buildRequest("GET", "$API_BASE/user")
+        val response = client.newCall(request).execute()
+        val body = response.body?.string() ?: return@withContext null
+        JSONObject(body).optString("login", null)
+    } catch (e: Exception) { null }
+    }
 
     // ═══════════════════════════════════════════
     // Create Repository

@@ -259,8 +259,8 @@ Return ONLY the JSON array. No other text.
 
     private suspend fun executeReviewCode(step: AgentStep): AgentStep {
         val code = step.output ?: return step.copy(status = StepStatus.FAILED, output = "No code to review")
-        val fixResult = codeExecutionManager.autoFixAndValidate(code, "kotlin", maxAttempts = MAX_RETRIES)
-        return if (fixResult.success) {
+        val fixResult = codeExecutionManager.autoFixCode(code, "kotlin", maxAttempts = MAX_RETRIES)
+                return if (fixResult.success) {
             step.copy(status = StepStatus.COMPLETED, reviewResult = CodeExecutionManager.CodeReview(fixResult.score, emptyList(), emptyList(), true), output = fixResult.finalCode)
         } else {
             step.copy(status = StepStatus.FAILED, output = "Review and fix failed after ${fixResult.attempts.size} attempts")

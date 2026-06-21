@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -47,10 +48,12 @@ fun InputBar(
     onResume: () -> Unit = {},
     attachedImageUris: List<Uri> = emptyList(),
     attachedFileNames: List<String> = emptyList(),
+    attachedFileTypes: List<String> = emptyList(),
     onRemoveAttachment: (Int) -> Unit = {},
-    // ── Translate mode ──
     isTranslateMode: Boolean = false,
-    onToggleTranslateMode: () -> Unit = {}
+    onToggleTranslateMode: () -> Unit = {},
+    isSearchMode: Boolean = false,
+    onToggleSearchMode: () -> Unit = {}
 ) {
     Column(
         modifier = modifier
@@ -58,7 +61,7 @@ fun InputBar(
             .imePadding()
             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)
     ) {
-        // ── Multiple attachment chips ──
+        // ── Attachment chips ──
         if (attachedImageUris.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -68,28 +71,35 @@ fun InputBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 attachedImageUris.forEachIndexed { index, uri ->
+                    val fileType = attachedFileTypes.getOrElse(index) { "📎" }
+                    val fileName = attachedFileNames.getOrElse(index) { "File" }
+
                     Box {
-                        AsyncImage(
-                            model = uri,
-                            contentDescription = "Attachment ${index + 1}",
+                        Row(
                             modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(6.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        IconButton(
-                            onClick = { onRemoveAttachment(index) },
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(14.dp)
-                                .offset(x = 4.dp, y = (-4).dp)
+                                .background(ZarpBubbleBg, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove",
-                                tint = Color.White,
-                                modifier = Modifier.size(10.dp)
+                            Text(fileType, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (fileName.length > 15) fileName.take(15) + "..." else fileName,
+                                color = ZarpTextPrimary,
+                                fontSize = 12.sp,
+                                maxLines = 1
                             )
+                            IconButton(
+                                onClick = { onRemoveAttachment(index) },
+                                modifier = Modifier.size(16.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    "Remove",
+                                    tint = ZarpTextTertiary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -113,36 +123,52 @@ fun InputBar(
             // Attach button
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .clickable { onAttachmentTap() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.AttachFile,
-                    contentDescription = "Attach",
+                    Icons.Rounded.AttachFile,
+                    "Attach",
                     tint = ZarpTextTertiary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
-            // Translate toggle button (globe icon)
+            // Search toggle 🌐
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable { onToggleSearchMode() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.TravelExplore,
+                    "Search web",
+                    tint = if (isSearchMode) ZarpAccent else ZarpTextTertiary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Translate toggle 🌍
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
                     .clip(CircleShape)
                     .clickable { onToggleTranslateMode() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.Translate,
-                    contentDescription = if (isTranslateMode) "Translate mode ON" else "Translate mode OFF",
+                    Icons.Rounded.Translate,
+                    "Translate",
                     tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(2.dp))
 
             // Text field
             Box(
@@ -150,20 +176,22 @@ fun InputBar(
                     .weight(1f)
                     .padding(vertical = 12.dp)
             ) {
-                if (inputText.isEmpty() && !isListening) {
-                    Text(
-                        text = if (isTranslateMode) "Type in any language..." else "Message Zarp...",
-                        color = ZarpTextTertiary,
-                        fontSize = 16.sp
-                    )
-                } else if (isListening) {
-                    Text("Listening...", color = ZarpTextTertiary, fontSize = 16.sp)
+                val placeholder = when {
+                    isListening -> "Listening..."
+                    isSearchMode && isTranslateMode -> "Search + Translate..."
+                    isSearchMode -> "Search the web..."
+                    isTranslateMode -> "Type in any language..."
+                    else -> "Message Zarp..."
+                }
+
+                if (inputText.isEmpty()) {
+                    Text(placeholder, color = ZarpTextTertiary, fontSize = 15.sp)
                 }
                 if (!isListening) {
                     BasicTextField(
                         value = inputText,
                         onValueChange = onInputChanged,
-                        textStyle = TextStyle(color = ZarpTextPrimary, fontSize = 16.sp),
+                        textStyle = TextStyle(color = ZarpTextPrimary, fontSize = 15.sp),
                         cursorBrush = SolidColor(ZarpAccent),
                         maxLines = 5,
                         modifier = Modifier.fillMaxWidth(),
@@ -172,9 +200,9 @@ fun InputBar(
                 }
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(2.dp))
 
-            // ── Dynamic button: Send / Pause / Resume / Mic ──
+            // Dynamic action button
             Crossfade(
                 targetState = when {
                     isThinking -> "pause"
@@ -225,12 +253,12 @@ fun InputBar(
                     else -> {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
                                 .clickable { onMicTap() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Mic, "Microphone", tint = ZarpTextTertiary, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.Mic, "Microphone", tint = ZarpTextTertiary, modifier = Modifier.size(22.dp))
                         }
                     }
                 }

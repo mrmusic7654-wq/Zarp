@@ -3,9 +3,6 @@ package com.example.data
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
-import com.google.ai.client.generativeai.type.generationConfig
-import com.google.ai.client.generativeai.type.tool
-import com.google.ai.client.generativeai.type.codeExecution
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -18,10 +15,6 @@ class CodeExecutionManager(private val apiKey: String) {
         private const val MAX_FIX_ATTEMPTS = 3
         private const val PASS_SCORE = 8
     }
-
-    // ═══════════════════════════════════════════
-    // Data Classes
-    // ═══════════════════════════════════════════
 
     data class ExecutionResult(
         val success: Boolean,
@@ -67,14 +60,14 @@ class CodeExecutionManager(private val apiKey: String) {
             val model = GenerativeModel(
                 modelName = modelName,
                 apiKey = apiKey,
-                generationConfig = generationConfig {
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig {
                     temperature = 0.1f
                     maxOutputTokens = 4096
                 },
                 tools = listOf(
-                    tool {
-                        codeExecution = codeExecution()
-                    }
+                    com.google.ai.client.generativeai.type.tool(
+                        codeExecution = com.google.ai.client.generativeai.type.codeExecution()
+                    )
                 )
             )
 
@@ -114,10 +107,6 @@ class CodeExecutionManager(private val apiKey: String) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Execute with Multiple Test Cases
-    // ═══════════════════════════════════════════
-
     suspend fun executePythonWithTests(
         code: String,
         testCases: List<String>,
@@ -130,10 +119,6 @@ class CodeExecutionManager(private val apiKey: String) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Review Code Quality (Returns 1-10 Score)
-    // ═══════════════════════════════════════════
-
     suspend fun reviewCode(
         code: String,
         language: String = "python",
@@ -143,7 +128,7 @@ class CodeExecutionManager(private val apiKey: String) {
             val model = GenerativeModel(
                 modelName = modelName,
                 apiKey = apiKey,
-                generationConfig = generationConfig {
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig {
                     temperature = 0.2f
                     maxOutputTokens = 2048
                 }
@@ -213,7 +198,7 @@ class CodeExecutionManager(private val apiKey: String) {
     // Auto-Fix Loop: review -> fix -> re-review
     // ═══════════════════════════════════════════
 
-    suspend fun autoFixCode(
+    suspend fun autoFixAndValidate(
         code: String,
         language: String = "python",
         modelName: String = EXEC_MODEL,
@@ -228,7 +213,7 @@ class CodeExecutionManager(private val apiKey: String) {
             attempts.add(AutoFixAttempt(attemptNumber, review.score, review.issues))
 
             if (review.passesReview) {
-                Log.d(TAG, "autoFixCode: passed on attempt $attemptNumber (score=${review.score})")
+                Log.d(TAG, "autoFixAndValidate: passed on attempt $attemptNumber (score=${review.score})")
                 return@withContext AutoFixResult(
                     success = true,
                     finalCode = currentCode,
@@ -238,7 +223,7 @@ class CodeExecutionManager(private val apiKey: String) {
             }
 
             if (review.issues.isEmpty()) {
-                Log.w(TAG, "autoFixCode: no issues reported but score below threshold, stopping")
+                Log.w(TAG, "autoFixAndValidate: no issues reported but score below threshold, stopping")
                 return@withContext AutoFixResult(
                     success = false,
                     finalCode = currentCode,
@@ -247,7 +232,7 @@ class CodeExecutionManager(private val apiKey: String) {
                 )
             }
 
-            Log.d(TAG, "autoFixCode: attempt $attemptNumber failed (score=${review.score}), requesting fix")
+            Log.d(TAG, "autoFixAndValidate: attempt $attemptNumber failed (score=${review.score}), requesting fix")
             currentCode = fixCode(currentCode, review.issues, language, modelName) ?: currentCode
         }
 
@@ -270,7 +255,7 @@ class CodeExecutionManager(private val apiKey: String) {
             val model = GenerativeModel(
                 modelName = modelName,
                 apiKey = apiKey,
-                generationConfig = generationConfig {
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig {
                     temperature = 0.1f
                     maxOutputTokens = 4096
                 }
@@ -342,14 +327,12 @@ class CodeExecutionManager(private val apiKey: String) {
         }
     }
 
-    /** Pulls the first fenced code block's contents out of a markdown response, if present. */
     private fun extractCodeFromMarkdown(text: String): String? {
         val fenceRegex = Regex("```[a-zA-Z]*\\n([\\s\\S]*?)```")
         val match = fenceRegex.find(text) ?: return null
         return match.groupValues[1].trim().ifBlank { null }
     }
 
-    /** Pulls a top-level JSON object out of a response that may contain extra text/markdown fences. */
     private fun extractJson(text: String): String? {
         val cleaned = text
             .removePrefix("```json").removePrefix("```")

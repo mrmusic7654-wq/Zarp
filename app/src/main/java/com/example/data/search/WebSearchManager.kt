@@ -13,14 +13,24 @@ import java.util.concurrent.TimeUnit
 
 object WebSearchManager {
 
-    private const val TAG = "WebSearchManager"
+    private const val TAG = "WebSearch"
+    private const val MAX_RETRIES = 2
+    private const val RETRY_DELAY_MS = 1500L
+    private const val CACHE_TTL_MS = 300_000L // 5 minutes
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+
+    // Simple in-memory cache
+    private val cache = mutableMapOf<String, CacheEntry>()
+    private data class CacheEntry(val response: SearchResponse, val timestamp: Long)
+
+    // ═══════════════════════════════════════════
+    // Data Classes
+    // ═══════════════════════════════════════════
 
     data class SearchResult(
         val title: String,
@@ -62,50 +72,74 @@ object WebSearchManager {
         val formattedContext: String = ""
     )
 
-    /**
-     * Execute a web search via HF Space.
-     * Reads the Space URL from KeyManager — no hardcoded URLs.
-     */
+    // ═══════════════════════════════════════════
+    // Public API
+    // ═══════════════════════════════════════════
+
     suspend fun search(
         query: String,
         context: Context,
         fetchContent: Boolean = false
     ): SearchResponse = withContext(Dispatchers.IO) {
+        val cacheKey = "$query:$fetchContent"
+        
+        // Check cache
+        cache[cacheKey]?.let { entry ->
+            if (System.currentTimeMillis() - entry.timestamp < CACHE_TTL_MS) {
+                Log.d(TAG, "📦 Cache hit: ${query.take(50)}")
+                return@withContext entry.response
+            }
+        }
+
         val spaceUrl = KeyManager.getHFSpaceUrl(context)
         if (spaceUrl.isBlank()) {
-            Log.w(TAG, "HF Space URL not configured")
+            Log.w(TAG, "⚠️ HF Space URL not configured")
             return@withContext SearchResponse(query = query)
         }
 
-        try {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            val fullUrl = "$spaceUrl?q=$encoded&fetch=$fetchContent"
+        // Retry logic
+        var lastError: String? = null
+        repeat(MAX_RETRIES) { attempt ->
+            try {
+                val encoded = URLEncoder.encode(query, "UTF-8")
+                val fullUrl = "$spaceUrl?q=$encoded&fetch=$fetchContent"
+                
+                Log.d(TAG, "🔍 Searching (attempt ${attempt + 1}): ${query.take(60)}")
+                
+                val request = Request.Builder().url(fullUrl).header("User-Agent", "ZarpAI/3.0").get().build()
+                val response = client.newCall(request).execute()
+                val body = response.body?.string()
 
-            Log.d(TAG, "🔍 Searching via HF Space: ${query.take(60)}...")
+                if (body.isNullOrBlank()) {
+                    lastError = "Empty response"
+                    if (attempt < MAX_RETRIES - 1) kotlinx.coroutines.delay(RETRY_DELAY_MS)
+                    return@repeat
+                }
 
-            val request = Request.Builder()
-                .url(fullUrl)
-                .header("User-Agent", "ZarpAI/2.0")
-                .get()
-                .build()
+                val result = parseResponse(query, body)
+                if (result.results.isEmpty() && attempt < MAX_RETRIES - 1) {
+                    lastError = "No results"
+                    kotlinx.coroutines.delay(RETRY_DELAY_MS)
+                    return@repeat
+                }
 
-            val response = client.newCall(request).execute()
-            val body = response.body?.string()
-
-            if (body.isNullOrBlank()) {
-                Log.w(TAG, "Empty response from HF Space")
-                return@withContext SearchResponse(query = query)
+                // Cache successful result
+                cache[cacheKey] = CacheEntry(result, System.currentTimeMillis())
+                Log.d(TAG, "✅ ${result.results.size} results from ${result.stats.enginesSearched.size} engines")
+                return@withContext result
+            } catch (e: Exception) {
+                lastError = e.localizedMessage
+                Log.w(TAG, "⚠️ Attempt ${attempt + 1} failed: ${e.localizedMessage}")
+                if (attempt < MAX_RETRIES - 1) kotlinx.coroutines.delay(RETRY_DELAY_MS)
             }
-
-            parseResponse(query, body)
-        } catch (e: Exception) {
-            Log.e(TAG, "Search failed", e)
-            SearchResponse(query = query)
         }
+
+        Log.e(TAG, "❌ All retries failed: $lastError")
+        SearchResponse(query = query)
     }
 
     /**
-     * Shortcut: returns only the formatted context string for Gemini.
+     * Shortcut: returns only formatted context for Gemini injection.
      */
     suspend fun searchForContext(
         query: String,
@@ -115,24 +149,28 @@ object WebSearchManager {
         return search(query, context, fetchContent).formattedContext
     }
 
+    // ═══════════════════════════════════════════
+    // Response Parser
+    // ═══════════════════════════════════════════
+
     private fun parseResponse(query: String, json: String): SearchResponse {
         return try {
             val obj = JSONObject(json)
 
-            // Results
+            // Parse results
             val resultsArr = obj.optJSONArray("results") ?: org.json.JSONArray()
             val results = (0 until resultsArr.length()).map { i ->
                 val item = resultsArr.getJSONObject(i)
                 SearchResult(
-                    title = item.optString("title", "Untitled"),
-                    url = item.optString("url", ""),
-                    snippet = item.optString("snippet", ""),
-                    engine = item.optString("engine", "Unknown"),
+                    title = item.optString("title", "Untitled").trim().ifBlank { "Untitled" },
+                    url = item.optString("url", "").trim(),
+                    snippet = item.optString("snippet", "").trim().take(500),
+                    engine = item.optString("engine", "Web"),
                     credibility = item.optInt("credibility", 5)
                 )
-            }
+            }.filter { it.url.isNotBlank() }
 
-            // Video
+            // Parse video
             val videoObj = obj.optJSONObject("video")
             val video = if (videoObj != null) {
                 YouTubeInfo(
@@ -140,23 +178,23 @@ object WebSearchManager {
                     title = videoObj.optString("title", ""),
                     author = videoObj.optString("author", ""),
                     thumbnail = videoObj.optString("thumbnail", ""),
-                    description = videoObj.optString("description", "")
+                    description = videoObj.optString("description", "").take(3000)
                 )
             } else null
 
-            // Content
+            // Parse content
             val contentArr = obj.optJSONArray("content") ?: org.json.JSONArray()
             val content = (0 until contentArr.length()).map { i ->
                 val item = contentArr.getJSONObject(i)
                 ContentResult(
                     url = item.optString("url", ""),
                     title = item.optString("title", ""),
-                    text = item.optString("text", ""),
+                    text = item.optString("text", "").take(4000),
                     length = item.optInt("length", 0)
                 )
             }
 
-            // Stats
+            // Parse stats
             val statsObj = obj.optJSONObject("stats")
             val stats = if (statsObj != null) {
                 val enginesMap = mutableMapOf<String, Int>()
@@ -173,49 +211,64 @@ object WebSearchManager {
                 )
             } else SearchStats()
 
-            // Formatted context
-            val formattedContext = buildString {
-                appendLine("🌐 Web Search: \"$query\"")
-                appendLine()
+            // Build formatted context
+            val formattedContext = buildContextString(query, results, video, content, stats)
 
-                if (results.isNotEmpty()) {
-                    results.forEachIndexed { i, r ->
-                        appendLine("[Source ${i + 1}: ${r.title}](${r.url})")
-                        if (r.snippet.isNotBlank()) appendLine("   ${r.snippet.take(200)}")
-                        appendLine()
-                    }
-                }
-                if (video != null) {
-                    appendLine("🎬 YouTube: ${video.title} by ${video.author}")
-                    if (video.description.isNotBlank()) appendLine("   ${video.description.take(500)}")
-                    appendLine()
-                }
-                if (content.isNotEmpty()) {
-                    appendLine("📄 Full Content:")
-                    content.forEach { c ->
-                        appendLine("── ${c.title.take(80)} ──")
-                        appendLine(c.text.take(2000))
-                        appendLine()
-                    }
-                }
-                if (stats.enginesSearched.isNotEmpty()) {
-                    appendLine("⚡ ${stats.enginesSearched.size} engines | ${stats.totalFound} results | ${stats.timeSeconds}s")
-                }
-            }
-
-            Log.d(TAG, "✅ ${results.size} results, ${content.size} pages, ${stats.enginesSearched.size} engines")
-
-            SearchResponse(
-                query = query,
-                results = results,
-                video = video,
-                content = content,
-                stats = stats,
-                formattedContext = formattedContext.trim()
-            )
+            SearchResponse(query, results, video, content, stats, formattedContext)
         } catch (e: Exception) {
-            Log.e(TAG, "Parse failed", e)
+            Log.e(TAG, "Parse failed: ${e.localizedMessage}")
             SearchResponse(query = query)
         }
     }
+
+    private fun buildContextString(
+        query: String,
+        results: List<SearchResult>,
+        video: YouTubeInfo?,
+        content: List<ContentResult>,
+        stats: SearchStats
+    ): String = buildString {
+        appendLine("🌐 Web Search: \"$query\"")
+        appendLine()
+
+        if (results.isNotEmpty()) {
+            results.forEachIndexed { i, r ->
+                appendLine("[Source ${i + 1}: ${r.title}](${r.url})")
+                if (r.snippet.isNotBlank()) appendLine("   ${r.snippet.take(250)}")
+                appendLine()
+            }
+        }
+
+        if (video != null && video.title.isNotBlank()) {
+            appendLine("🎬 YouTube: ${video.title} by ${video.author}")
+            if (video.description.isNotBlank()) appendLine("   ${video.description.take(500)}")
+            appendLine()
+        }
+
+        if (content.isNotEmpty()) {
+            appendLine("📄 Full Content:")
+            content.forEach { c ->
+                if (c.text.isNotBlank()) {
+                    appendLine("── ${c.title.take(80)} ──")
+                    appendLine(c.text.take(2000))
+                    appendLine()
+                }
+            }
+        }
+
+        if (stats.enginesSearched.isNotEmpty()) {
+            appendLine("⚡ ${stats.enginesSearched.size} engines | ${stats.totalFound} results | ${stats.timeSeconds}s")
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // Cache Management
+    // ═══════════════════════════════════════════
+
+    fun clearCache() {
+        cache.clear()
+        Log.d(TAG, "🗑️ Cache cleared")
+    }
+
+    fun getCacheSize(): Int = cache.size
 }

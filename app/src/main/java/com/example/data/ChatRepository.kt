@@ -21,6 +21,7 @@ class ChatRepository(context: Context) {
     private val conversationsFile = File(context.filesDir, "zarp_conversations.json")
     private val tasksFile = File(context.filesDir, "zarp_tasks.json")
     private val messagesDir = File(context.filesDir, "zarp_messages")
+    private val taskMessagesDir = File(context.filesDir, "zarp_task_messages")
 
     // ── Conversations ──
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
@@ -32,6 +33,7 @@ class ChatRepository(context: Context) {
 
     init {
         messagesDir.mkdirs()
+        taskMessagesDir.mkdirs()
         loadConversations()
         loadTasks()
     }
@@ -94,7 +96,7 @@ class ChatRepository(context: Context) {
                     timestamp = obj.getLong("timestamp")
                 ))
             }
-            Log.d(TAG, "📂 Loaded ${list.size} messages for $conversationId")
+            Log.d(TAG, "📂 Loaded ${list.size} messages for conversation $conversationId")
             list
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load messages for $conversationId", e)
@@ -105,34 +107,22 @@ class ChatRepository(context: Context) {
     suspend fun createNewConversation(firstMessage: String): Conversation {
         val conversationId = UUID.randomUUID().toString()
         val title = generateTitle(firstMessage)
-        val conv = Conversation(
-            id = conversationId,
-            title = title,
-            dateGroup = "Today",
-            messages = emptyList()
-        )
+        val conv = Conversation(id = conversationId, title = title, dateGroup = "Today", messages = emptyList())
         val list = _conversations.value.toMutableList()
         list.add(0, conv)
         _conversations.value = list
         saveConversations()
 
         saveMessageToFile(conversationId, Message(
-            id = UUID.randomUUID().toString(),
-            text = firstMessage,
-            isUser = true,
-            timestamp = System.currentTimeMillis()
-        ))
+            id = UUID.randomUUID().toString(), text = firstMessage, isUser = true, timestamp = System.currentTimeMillis()
+        ), isTask = false)
         Log.d(TAG, "✅ Created conversation: $conversationId - $title")
         return conv
     }
 
     suspend fun addMessageToConversation(conversationId: String, text: String, isUser: Boolean) {
-        saveMessageToFile(conversationId, Message(
-            id = UUID.randomUUID().toString(),
-            text = text,
-            isUser = isUser,
-            timestamp = System.currentTimeMillis()
-        ))
+        val msg = Message(id = UUID.randomUUID().toString(), text = text, isUser = isUser, timestamp = System.currentTimeMillis())
+        saveMessageToFile(conversationId, msg, isTask = false)
         Log.d(TAG, "✅ Added ${if (isUser) "user" else "AI"} message to $conversationId")
     }
 
@@ -141,6 +131,7 @@ class ChatRepository(context: Context) {
         _conversations.value = _conversations.value.filter { it.id != conversationId }
         saveConversations()
         // Also remove from tasks if present
+        getTaskMessagesFile(conversationId).delete()
         _tasks.value = _tasks.value.filter { it.id != conversationId }
         saveTasks()
         Log.d(TAG, "🗑️ Deleted conversation $conversationId")
@@ -189,34 +180,63 @@ class ChatRepository(context: Context) {
 
     fun getAllTasks(): Flow<List<Conversation>> = _tasks
 
-    /**
-     * Promotes the current conversation into the Task History list.
-     * Tasks are stored separately and survive independently of conversations.
-     */
-    suspend fun promoteToTask(conversationId: String) {
-        val conv = _conversations.value.find { it.id == conversationId } ?: run {
-            Log.w(TAG, "⚠️ Conversation $conversationId not found for task promotion")
-            return
+    suspend fun getTaskMessagesOnce(taskId: String): List<Message> {
+        return try {
+            val file = getTaskMessagesFile(taskId)
+            if (!file.exists()) return emptyList()
+            val arr = JSONArray(file.readText())
+            val list = mutableListOf<Message>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(Message(
+                    id = obj.getString("id"),
+                    text = obj.getString("text"),
+                    isUser = obj.getBoolean("isUser"),
+                    timestamp = obj.getLong("timestamp")
+                ))
+            }
+            Log.d(TAG, "🤖 Loaded ${list.size} task messages for $taskId")
+            list
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load task messages for $taskId", e)
+            emptyList()
         }
+    }
+
+    /**
+     * Saves the current conversation as a task with its own isolated message storage.
+     * Task messages are copied to a separate directory so they survive independently.
+     */
+    suspend fun saveConversationAsTask(conversationId: String, taskTitle: String) {
+        // Copy messages from conversation storage to task storage
+        val sourceFile = getMessagesFile(conversationId)
+        val destFile = getTaskMessagesFile(conversationId)
+        if (sourceFile.exists()) {
+            sourceFile.copyTo(destFile, overwrite = true)
+        }
+
+        // Add to task list
         val taskList = _tasks.value.toMutableList()
         val existingIndex = taskList.indexOfFirst { it.id == conversationId }
         if (existingIndex >= 0) {
-            // Update existing task title
-            taskList[existingIndex] = taskList[existingIndex].copy(
-                title = conv.title,
-                dateGroup = "Today"
-            )
-            Log.d(TAG, "🔄 Updated task: ${conv.title}")
+            taskList[existingIndex] = taskList[existingIndex].copy(title = taskTitle, dateGroup = "Today")
+            Log.d(TAG, "🔄 Updated task: $taskTitle")
         } else {
-            // Add new task at the top
-            taskList.add(0, conv.copy(dateGroup = "Today"))
-            Log.d(TAG, "🤖 Promoted to task: ${conv.title}")
+            taskList.add(0, Conversation(id = conversationId, title = taskTitle, dateGroup = "Today", messages = emptyList()))
+            Log.d(TAG, "🤖 Saved as task: $taskTitle")
         }
         _tasks.value = taskList
         saveTasks()
     }
 
+    suspend fun addTaskMessage(taskId: String, text: String, isUser: Boolean) {
+        val msg = Message(id = UUID.randomUUID().toString(), text = text, isUser = isUser, timestamp = System.currentTimeMillis())
+        saveMessageToFile(taskId, msg, isTask = true)
+        Log.d(TAG, "✅ Added ${if (isUser) "user" else "AI"} message to task $taskId")
+    }
+
     suspend fun deleteTask(taskId: String) {
+        getTaskMessagesFile(taskId).delete()
         _tasks.value = _tasks.value.filter { it.id != taskId }
         saveTasks()
         Log.d(TAG, "🗑️ Deleted task $taskId")
@@ -230,9 +250,13 @@ class ChatRepository(context: Context) {
         return File(messagesDir, "$conversationId.json")
     }
 
-    private fun saveMessageToFile(conversationId: String, message: Message) {
+    private fun getTaskMessagesFile(taskId: String): File {
+        return File(taskMessagesDir, "$taskId.json")
+    }
+
+    private fun saveMessageToFile(id: String, message: Message, isTask: Boolean) {
         try {
-            val file = getMessagesFile(conversationId)
+            val file = if (isTask) getTaskMessagesFile(id) else getMessagesFile(id)
             val arr = if (file.exists()) JSONArray(file.readText()) else JSONArray()
             val obj = JSONObject()
             obj.put("id", message.id)

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Zarp</string>
+    <string name="accessibility_description">Zarp uses accessibility to read screen content and automate tasks for you. No data is collected or shared.</string>
 </resources>

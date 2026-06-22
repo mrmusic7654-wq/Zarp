@@ -119,10 +119,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // File Helpers
-    // ═══════════════════════════════════════════
-
     private fun getFileType(uri: Uri): String {
         val mime = getApplication<Application>().contentResolver.getType(uri) ?: return "📎"
         return when {
@@ -136,18 +132,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Toggles
-    // ═══════════════════════════════════════════
-
     fun onInputChanged(text: String) { _uiState.value = _uiState.value.copy(inputText = text) }
     fun onToggleTranslateMode() { _uiState.value = _uiState.value.copy(isTranslateMode = !_uiState.value.isTranslateMode) }
     fun onToggleSearchMode() { _uiState.value = _uiState.value.copy(isSearchMode = !_uiState.value.isSearchMode) }
     fun onToggleAgentMode() { _uiState.value = _uiState.value.copy(isAgentMode = !_uiState.value.isAgentMode) }
-
-    // ═══════════════════════════════════════════
-    // Send
-    // ═══════════════════════════════════════════
 
     fun onSend() {
         if (_uiState.value.isAgentMode) onSendAgent() else onSendChat()
@@ -215,6 +203,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (currentText.isBlank()) return
 
         lastUserPrompt = currentText
+        val conversationId = _uiState.value.currentConversationId
         val userMessage = Message(UUID.randomUUID().toString(), "🤖 Agent: $currentText", true, System.currentTimeMillis())
 
         _uiState.value = _uiState.value.copy(
@@ -224,6 +213,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         currentGenerationJob = viewModelScope.launch {
             try {
+                // Save user message to conversation
+                conversationId?.let { chatRepository.addMessageToConversation(it, "🤖 Agent: $currentText", true) }
+
                 val task = agentLoopManager.executeAgentTask(
                     userRequest = currentText,
                     chatHistory = _uiState.value.messages.dropLast(1)
@@ -237,8 +229,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     messages = _uiState.value.messages + aiMessage, isAiThinking = false, agentTaskResult = task.result
                 )
 
-                // Auto-promote agent tasks to Task History
-                _uiState.value.currentConversationId?.let { chatRepository.promoteToTask(it) }
+                // Save AI response to conversation
+                conversationId?.let { chatRepository.addMessageToConversation(it, responseText, false) }
+
+                // ── SAVE AS TASK ──
+                conversationId?.let { id ->
+                    val taskTitle = if (currentText.length > 40) currentText.take(40) + "..." else currentText
+                    chatRepository.saveConversationAsTask(id, taskTitle)
+                    // Also save messages to task storage
+                    chatRepository.addTaskMessage(id, "🤖 Agent: $currentText", true)
+                    chatRepository.addTaskMessage(id, responseText, false)
+                    Log.d("ChatVM", "🤖 Saved as task: $taskTitle")
+                }
 
                 lastUserPrompt = ""
             } catch (e: CancellationException) { _uiState.value = _uiState.value.copy(isAiThinking = false); throw e }
@@ -258,10 +260,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch {
             try {
-                val msgs = chatRepository.getMessagesForConversationOnce(id)
-                _uiState.value = _uiState.value.copy(messages = msgs)
-                msgs.findLast { it.isUser }?.let { lastUserPrompt = it.text }
-                Log.d("ChatVM", "🤖 Loaded task: ${msgs.size} messages")
+                // Load from task-specific storage
+                val msgs = chatRepository.getTaskMessagesOnce(id)
+                if (msgs.isEmpty()) {
+                    // Fallback to conversation storage
+                    val convMsgs = chatRepository.getMessagesForConversationOnce(id)
+                    _uiState.value = _uiState.value.copy(messages = convMsgs)
+                } else {
+                    _uiState.value = _uiState.value.copy(messages = msgs)
+                }
+                _uiState.value.messages.findLast { it.isUser }?.let { lastUserPrompt = it.text }
+                Log.d("ChatVM", "🤖 Loaded task: ${_uiState.value.messages.size} messages")
             } catch (e: Exception) {
                 Log.e("ChatVM", "Failed to load task $id", e)
             }
@@ -272,12 +281,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             chatRepository.deleteTask(id)
             if (_uiState.value.currentConversationId == id) onNewChat()
-        }
-    }
-
-    fun onPromoteToTask() {
-        _uiState.value.currentConversationId?.let { id ->
-            viewModelScope.launch { chatRepository.promoteToTask(id) }
         }
     }
 

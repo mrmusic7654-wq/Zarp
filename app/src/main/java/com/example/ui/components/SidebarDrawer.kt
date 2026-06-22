@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.ChatRepository
 import com.example.model.Conversation
 import com.example.ui.theme.*
 
@@ -34,27 +35,29 @@ fun SidebarDrawer(
     onSelectConversation: (String) -> Unit,
     onDeleteConversation: ((String) -> Unit)? = null,
     onSettingsTap: () -> Unit,
-    // ── Task History ──
     tasks: List<Conversation> = emptyList(),
     onSelectTask: ((String) -> Unit)? = null,
     onDeleteTask: ((String) -> Unit)? = null,
+    projects: List<ChatRepository.ProjectInfo> = emptyList(),
+    onSelectProject: ((ChatRepository.ProjectInfo) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var chatExpanded by remember { mutableStateOf(true) }
     var taskExpanded by remember { mutableStateOf(true) }
+    var projectExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxHeight()
             .background(ZarpSidebarBg)
     ) {
-        // ── Top Section ──
+        // ── Header ──
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Zarp", color = ZarpTextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text("Zarp", color = ZarpTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Text("AI Assistant", color = ZarpTextTertiary, fontSize = 13.sp)
         }
 
-        // ── New Chat Button ──
+        // ── New Chat ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -79,44 +82,23 @@ fun SidebarDrawer(
             // CHAT HISTORY
             // ══════════════════════════════════════
             item {
-                CollapsibleSectionHeader(
-                    title = "💬 Chat History",
-                    count = conversations.size,
-                    expanded = chatExpanded,
-                    onToggle = { chatExpanded = !chatExpanded }
-                )
+                CollapsibleSectionHeader("💬 Chat History", conversations.size, chatExpanded) { chatExpanded = !chatExpanded }
             }
 
             if (chatExpanded) {
                 if (conversations.isEmpty()) {
-                    item {
-                        Text(
-                            "No conversations yet",
-                            color = ZarpTextTertiary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
+                    item { EmptyStateText("No conversations yet") }
                 } else {
                     val grouped = conversations.groupBy { it.dateGroup }
                     grouped.forEach { (group, convs) ->
-                        item {
-                            Text(
-                                group,
-                                color = ZarpTextTertiary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                            )
-                        }
+                        item { SectionLabel(group) }
                         items(convs, key = { "chat_${it.id}" }) { conv ->
-                            ChatItem(
-                                conv = conv,
+                            HistoryItem(
+                                icon = Icons.Default.ChatBubbleOutline,
+                                title = conv.title,
                                 isSelected = conv.id == currentConversationId,
                                 onClick = { onSelectConversation(conv.id) },
-                                onDelete = if (onDeleteConversation != null) {
-                                    { onDeleteConversation(conv.id) }
-                                } else null
+                                onDelete = onDeleteConversation?.let { { it(conv.id) } }
                             )
                         }
                     }
@@ -130,56 +112,62 @@ fun SidebarDrawer(
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(color = ZarpDivider, modifier = Modifier.padding(horizontal = 12.dp))
                 Spacer(modifier = Modifier.height(4.dp))
-                CollapsibleSectionHeader(
-                    title = "🤖 Task History",
-                    count = tasks.size,
-                    expanded = taskExpanded,
-                    onToggle = { taskExpanded = !taskExpanded }
-                )
+                CollapsibleSectionHeader("🤖 Task History", tasks.size, taskExpanded) { taskExpanded = !taskExpanded }
             }
 
             if (taskExpanded) {
                 if (tasks.isEmpty()) {
-                    item {
-                        Text(
-                            "No tasks yet. Use Agent Mode to create tasks.",
-                            color = ZarpTextTertiary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
+                    item { EmptyStateText("No tasks yet. Use Agent Mode.") }
                 } else {
                     items(tasks, key = { "task_${it.id}" }) { task ->
-                        TaskItem(
-                            task = task,
+                        HistoryItem(
+                            icon = Icons.Default.Code,
+                            title = task.title,
                             isSelected = task.id == currentConversationId,
                             onClick = { onSelectTask?.invoke(task.id) },
-                            onDelete = if (onDeleteTask != null) {
-                                { onDeleteTask(task.id) }
-                            } else null
+                            onDelete = onDeleteTask?.let { { it(task.id) } },
+                            accentColor = Color(0xFF00E676)
+                        )
+                    }
+                }
+            }
+
+            // ══════════════════════════════════════
+            // PROJECTS
+            // ══════════════════════════════════════
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = ZarpDivider, modifier = Modifier.padding(horizontal = 12.dp))
+                Spacer(modifier = Modifier.height(4.dp))
+                CollapsibleSectionHeader("🚀 Projects", projects.size, projectExpanded) { projectExpanded = !projectExpanded }
+            }
+
+            if (projectExpanded) {
+                if (projects.isEmpty()) {
+                    item { EmptyStateText("No projects yet. Agent Mode creates projects.") }
+                } else {
+                    items(projects, key = { "proj_${it.id}" }) { project ->
+                        ProjectItem(
+                            project = project,
+                            onClick = { onSelectProject?.invoke(project) }
                         )
                     }
                 }
             }
         }
 
-        // ── Bottom Section ──
+        // ── Bottom ──
         Column {
             HorizontalDivider(color = ZarpDivider, thickness = 1.dp)
+            SidebarActionItem(Icons.Outlined.Settings, "Settings", onSettingsTap)
+            SidebarActionItem(Icons.Outlined.Star, "Zarp Pro", {})
 
-            SidebarActionItem(icon = Icons.Outlined.Settings, text = "Settings", onClick = onSettingsTap)
-            SidebarActionItem(icon = Icons.Outlined.Star, text = "Zarp Pro", onClick = {})
-
-            // User Profile
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier.size(32.dp).clip(CircleShape).background(ZarpTextTertiary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("U", color = ZarpSidebarBg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Box(modifier = Modifier.size(32.dp).clip(CircleShape).background(ZarpAccent), contentAlignment = Alignment.Center) {
+                    Text("U", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
@@ -192,57 +180,39 @@ fun SidebarDrawer(
 }
 
 // ═══════════════════════════════════════════
-// Collapsible Section Header
+// Components
 // ═══════════════════════════════════════════
 
 @Composable
-private fun CollapsibleSectionHeader(
+private fun CollapsibleSectionHeader(title: String, count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onToggle() }.padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = ZarpTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        if (count > 0) { Text("$count", color = ZarpTextTertiary, fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp)) }
+        Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, "Toggle", tint = ZarpTextTertiary, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, color = ZarpTextTertiary, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+}
+
+@Composable
+private fun EmptyStateText(text: String) {
+    Text(text, color = ZarpTextTertiary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+}
+
+@Composable
+private fun HistoryItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    count: Int,
-    expanded: Boolean,
-    onToggle: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggle() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            title,
-            color = ZarpTextSecondary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
-        )
-        if (count > 0) {
-            Text(
-                "$count",
-                color = ZarpTextTertiary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(end = 8.dp)
-            )
-        }
-        Icon(
-            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-            "Toggle",
-            tint = ZarpTextTertiary,
-            modifier = Modifier.size(18.dp)
-        )
-    }
-}
-
-// ═══════════════════════════════════════════
-// Chat Item
-// ═══════════════════════════════════════════
-
-@Composable
-private fun ChatItem(
-    conv: Conversation,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onDelete: (() -> Unit)?
+    onDelete: (() -> Unit)? = null,
+    accentColor: Color = ZarpTextPrimary
 ) {
     Row(
         modifier = Modifier
@@ -254,21 +224,9 @@ private fun ChatItem(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            Icons.Default.ChatBubbleOutline,
-            null,
-            tint = if (isSelected) ZarpTextPrimary else ZarpTextTertiary,
-            modifier = Modifier.size(16.dp)
-        )
+        Icon(icon, null, tint = if (isSelected) accentColor else ZarpTextTertiary, modifier = Modifier.size(16.dp))
         Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            conv.title,
-            color = if (isSelected) ZarpTextPrimary else ZarpTextSecondary,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        Text(title, color = if (isSelected) accentColor else ZarpTextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (onDelete != null) {
             IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                 Icon(Icons.Default.Delete, "Delete", tint = ZarpTextTertiary, modifier = Modifier.size(14.dp))
@@ -277,48 +235,33 @@ private fun ChatItem(
     }
 }
 
-// ═══════════════════════════════════════════
-// Task Item
-// ═══════════════════════════════════════════
-
 @Composable
-private fun TaskItem(
-    task: Conversation,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    onDelete: (() -> Unit)?
+private fun ProjectItem(
+    project: ChatRepository.ProjectInfo,
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) ZarpBubbleBg else ZarpSidebarBg)
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("🤖", fontSize = 14.sp)
+        val icon = when (project.buildStatus) {
+            "success" -> "✅"
+            "failure" -> "❌"
+            else -> "🚀"
+        }
+        Text(icon, fontSize = 14.sp)
         Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            task.title,
-            color = if (isSelected) ZarpTextPrimary else ZarpTextSecondary,
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        if (onDelete != null) {
-            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Delete, "Delete", tint = ZarpTextTertiary, modifier = Modifier.size(14.dp))
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(project.name, color = ZarpTextSecondary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${project.filesCount} files • ${project.architectureType ?: "mvvm"}", color = ZarpTextTertiary, fontSize = 10.sp)
         }
     }
 }
-
-// ═══════════════════════════════════════════
-// Sidebar Action Item
-// ═══════════════════════════════════════════
 
 @Composable
 fun SidebarActionItem(
@@ -327,10 +270,7 @@ fun SidebarActionItem(
     onClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = ZarpTextPrimary, modifier = Modifier.size(20.dp))

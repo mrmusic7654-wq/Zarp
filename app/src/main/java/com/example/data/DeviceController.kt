@@ -200,13 +200,24 @@ class DeviceController(private val context: Context) {
     }
 
     private fun executeScreenshot(): ActionResult {
-        val service = accessibilityService ?: return ActionResult(false, "No service")
-        return try {
-            service.takeScreenshot(android.os.Handler(Looper.getMainLooper())) { _ -> }
-            ActionResult(true, "Screenshot requested")
-        } catch (e: Exception) { ActionResult(false, "Screenshot failed: ${e.localizedMessage}") }
+    val service = accessibilityService ?: return ActionResult(false, "No service")
+    return try {
+        service.takeScreenshot(
+            android.os.Handler(Looper.getMainLooper()),
+            object : AccessibilityService.TakeScreenshotCallback {
+                override fun onSuccess(screenshot: android.graphics.Bitmap) {
+                    screenshot.recycle()
+                }
+                override fun onFailure(errorCode: Int) {
+                    Log.w(TAG, "Screenshot failed with code: $errorCode")
+                }
+            }
+        )
+        ActionResult(true, "Screenshot captured")
+    } catch (e: Exception) {
+        ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
     }
-
+    }
     private suspend fun executeScroll(up: Boolean): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")

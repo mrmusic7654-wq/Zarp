@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.Executors
 
 class DeviceController(private val context: Context) {
 
@@ -61,10 +62,6 @@ class DeviceController(private val context: Context) {
     }
 
     private val isServiceAvailable: Boolean get() = accessibilityService != null
-
-    // ═══════════════════════════════════════════
-    // Unified Execute with Retry
-    // ═══════════════════════════════════════════
 
     suspend fun executeAction(
         action: DeviceAction,
@@ -134,8 +131,6 @@ class DeviceController(private val context: Context) {
         }
     }
 
-    // ── Action implementations ──
-
     private suspend fun executeTap(action: DeviceAction): ActionResult {
         return if (action.target != null) {
             executeFindAndTap(action.target)
@@ -200,24 +195,26 @@ class DeviceController(private val context: Context) {
     }
 
     private fun executeScreenshot(): ActionResult {
-    val service = accessibilityService ?: return ActionResult(false, "No service")
-    return try {
-        service.takeScreenshot(
-            android.os.Handler(Looper.getMainLooper()),
-            object : AccessibilityService.TakeScreenshotCallback {
-                override fun onSuccess(screenshot: android.graphics.Bitmap) {
-                    screenshot.recycle()
+        val service = accessibilityService ?: return ActionResult(false, "No service")
+        return try {
+            service.takeScreenshot(
+                mainHandler,
+                Executors.newSingleThreadExecutor(),
+                object : AccessibilityService.TakeScreenshotCallback {
+                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                        Log.d(TAG, "📸 Screenshot captured")
+                    }
+                    override fun onFailure(errorCode: Int) {
+                        Log.w(TAG, "Screenshot failed: $errorCode")
+                    }
                 }
-                override fun onFailure(errorCode: Int) {
-                    Log.w(TAG, "Screenshot failed with code: $errorCode")
-                }
-            }
-        )
-        ActionResult(true, "Screenshot captured")
-    } catch (e: Exception) {
-        ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
+            )
+            ActionResult(true, "Screenshot captured")
+        } catch (e: Exception) {
+            ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
+        }
     }
-    }
+
     private suspend fun executeScroll(up: Boolean): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")
@@ -243,8 +240,6 @@ class DeviceController(private val context: Context) {
         return if (result) ActionResult(true, "Tapped '$target'") else ActionResult(false, "Could not find '$target'")
     }
 
-    // ── Screen reading ──
-
     suspend fun readScreen(): String? = withContext(Dispatchers.IO) {
         val root = getRootNode() ?: return@withContext null
         val content = extractNodeText(root)
@@ -263,8 +258,6 @@ class DeviceController(private val context: Context) {
         for (i in 0 until node.childCount) node.getChild(i)?.let { sb.append(extractNodeText(it, depth + 1)) }
         return sb.toString()
     }
-
-    // ── Node helpers ──
 
     private fun getRootNode(): AccessibilityNodeInfo? {
         val service = accessibilityService ?: return null
@@ -310,10 +303,6 @@ class DeviceController(private val context: Context) {
 
     fun cleanup() { accessibilityService = null; Log.d(TAG, "🧹 Cleaned up") }
 }
-
-// ═══════════════════════════════════════════
-// Accessibility Service
-// ═══════════════════════════════════════════
 
 class ZarpAccessibilityService : AccessibilityService() {
     companion object {

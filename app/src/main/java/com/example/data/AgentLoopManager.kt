@@ -25,6 +25,8 @@ class AgentLoopManager(
         private const val MAX_PLAN_RETRIES = 3
         private const val MAX_FIX_RETRIES = 2
         private const val MAX_OUTPUT_TOKENS = 8192
+        private const val BUILD_TIMEOUT_SECONDS = 180
+        private const val POLL_INTERVAL_MS = 5000L
     }
 
     // ═══════════════════════════════════════════
@@ -60,12 +62,11 @@ class AgentLoopManager(
 
     enum class AgentStatus {
         IDLE, PLANNING, GENERATING, REVIEWING, FIXING, PUSHING,
-        WAITING_BUILD, BUILD_FAILED, FIXING_BUILD, REBUILDING, COMPLETED, FAILED, CANCELLED
+        WAITING_BUILD, BUILD_FAILED, FIXING_BUILD, REBUILDING,
+        COMPLETED, FAILED, CANCELLED
     }
 
-    enum class StepStatus {
-        PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, RETRYING
-    }
+    enum class StepStatus { PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, RETRYING }
 
     enum class StepAction {
         GENERATE_CODE, REVIEW_CODE, FIX_CODE, PUSH_TO_GITHUB,
@@ -96,7 +97,7 @@ class AgentLoopManager(
     )
 
     // ═══════════════════════════════════════════
-    // Main Agent Loop
+    // Main Agent Loop — Elite Edition
     // ═══════════════════════════════════════════
 
     suspend fun executeAgentTask(
@@ -124,17 +125,28 @@ class AgentLoopManager(
             }
 
             if (planJson.isBlank()) {
-                return@withContext task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Planning failed after $MAX_PLAN_RETRIES attempts", errors = planErrors, executionTimeMs = System.currentTimeMillis() - startTime))
+                return@withContext task.copy(
+                    status = AgentStatus.FAILED,
+                    result = AgentResult(false, "Planning failed after $MAX_PLAN_RETRIES attempts", errors = planErrors, executionTimeMs = System.currentTimeMillis() - startTime)
+                )
             }
 
             val steps = parsePlanSteps(planJson)
             if (steps.isEmpty()) {
-                return@withContext task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Could not parse plan", errors = listOf("Raw: ${planJson.take(200)}"), executionTimeMs = System.currentTimeMillis() - startTime))
+                return@withContext task.copy(
+                    status = AgentStatus.FAILED,
+                    result = AgentResult(false, "Could not parse plan", errors = listOf("Raw: ${planJson.take(200)}"), executionTimeMs = System.currentTimeMillis() - startTime)
+                )
             }
 
-            // Add workflow step automatically
-            val stepsWithWorkflow = steps.toMutableList()
-            stepsWithWorkflow.add(stepsWithWorkflow.size - 1, AgentStep(description = "Add GitHub Actions build workflow", action = StepAction.ADD_WORKFLOW, language = "yaml"))
+            // Auto-insert workflow step before the last step (PUSH)
+            val stepsWithWorkflow = mutableListOf<AgentStep>()
+            for (step in steps) {
+                if (step.action == StepAction.PUSH_TO_GITHUB) {
+                    stepsWithWorkflow.add(AgentStep(description = "Add GitHub Actions build workflow", action = StepAction.ADD_WORKFLOW, language = "yaml"))
+                }
+                stepsWithWorkflow.add(step)
+            }
 
             Log.d(TAG, "✅ Plan: ${stepsWithWorkflow.size} steps")
             onProgress(AgentProgress(task.id, AgentStatus.GENERATING, 0, stepsWithWorkflow.size, "Plan ready!", "${stepsWithWorkflow.size} steps", 0.1f))
@@ -147,7 +159,7 @@ class AgentLoopManager(
             var repoName: String? = null
 
             // ══════════════════════════════════════
-            // PHASE 2-4: Execute Steps
+            // PHASE 2-4: EXECUTE STEPS
             // ══════════════════════════════════════
             for ((index, step) in stepsWithWorkflow.withIndex()) {
                 val stepNum = index + 1
@@ -168,13 +180,13 @@ class AgentLoopManager(
                     }
                     StepAction.PUSH_TO_GITHUB -> {
                         onProgress(AgentProgress(task.id, AgentStatus.PUSHING, stepNum, totalSteps, step.description, "Pushing...", progress + 0.03f))
-                        executePushToGitHub(step, allFiles).also { result ->
-                            if (result.status == StepStatus.COMPLETED && result.output != null) {
-                                repoUrl = result.output
-                                repoOwner = gitHubAgent.getAuthenticatedUsername()
-                                repoName = repoUrl?.let { extractRepoName(it) }
-                            }
+                        val pushResult = executePushToGitHub(step, allFiles)
+                        if (pushResult.status == StepStatus.COMPLETED && pushResult.output != null) {
+                            repoUrl = pushResult.output
+                            repoOwner = gitHubAgent.getAuthenticatedUsername()
+                            repoName = repoUrl?.let { extractRepoName(it) }
                         }
+                        pushResult
                     }
                     StepAction.FIX_BUILD -> {
                         onProgress(AgentProgress(task.id, AgentStatus.FIXING_BUILD, stepNum, totalSteps, step.description, "Fixing build...", progress + 0.03f))
@@ -194,18 +206,21 @@ class AgentLoopManager(
             var buildLog: BuildMonitor.BuildLog? = null
             var fixAttempts = 0
 
-            if (repoOwner != null && repoName != null) {
+            // Local copies to avoid smart cast issues
+            val finalOwner = repoOwner
+            val finalName = repoName
+
+            if (finalOwner != null && finalName != null) {
                 val token = KeyManager.getGithubKey(context) ?: ""
                 if (token.isNotBlank()) {
                     val buildMonitor = BuildMonitor(token)
 
                     onProgress(AgentProgress(task.id, AgentStatus.WAITING_BUILD, totalSteps, totalSteps, "Building...", "Waiting for GitHub Actions", 0.85f))
-
-                    buildStatus = buildMonitor.waitForBuildCompletion(repoOwner, repoName, maxWaitSeconds = 120)
+                    buildStatus = buildMonitor.waitForBuildCompletion(finalOwner, finalName, maxWaitSeconds = BUILD_TIMEOUT_SECONDS, pollIntervalMs = POLL_INTERVAL_MS)
 
                     if (buildStatus != null && buildStatus.isFailure) {
                         onProgress(AgentProgress(task.id, AgentStatus.BUILD_FAILED, totalSteps, totalSteps, "Build failed!", "Fetching error logs...", 0.9f))
-                        buildLog = buildMonitor.getBuildLogs(repoOwner, repoName, buildStatus.id)
+                        buildLog = buildMonitor.getBuildLogs(finalOwner, finalName, buildStatus.id)
 
                         // Auto-fix loop
                         while (fixAttempts < MAX_FIX_RETRIES && buildStatus?.isFailure == true) {
@@ -215,7 +230,7 @@ class AgentLoopManager(
 
                             val fixStep = executeFixBuild(
                                 AgentStep(description = "Fix build errors", action = StepAction.FIX_BUILD),
-                                "Build failed with errors. Fix the code so it compiles.",
+                                "Build failed with ${buildLog?.errors?.size ?: 0} errors. Analyze the error log and fix the code.",
                                 completedSteps
                             )
 
@@ -226,9 +241,9 @@ class AgentLoopManager(
                                 )
 
                                 if (pushResult.status == StepStatus.COMPLETED) {
-                                    delay(5000)
-                                    buildStatus = buildMonitor.waitForBuildCompletion(repoOwner, repoName, maxWaitSeconds = 60)
-                                    buildLog = if (buildStatus?.isFailure == true) buildMonitor.getBuildLogs(repoOwner, repoName, buildStatus.id) else null
+                                    delay(POLL_INTERVAL_MS)
+                                    buildStatus = buildMonitor.waitForBuildCompletion(finalOwner, finalName, maxWaitSeconds = 60, pollIntervalMs = POLL_INTERVAL_MS)
+                                    buildLog = if (buildStatus?.isFailure == true) buildMonitor.getBuildLogs(finalOwner, finalName, buildStatus.id) else null
                                 }
                             } else {
                                 break
@@ -248,20 +263,35 @@ class AgentLoopManager(
             onProgress(AgentProgress(task.id, if (success) AgentStatus.COMPLETED else AgentStatus.COMPLETED, totalSteps, totalSteps, if (success) "✅ Success!" else "⚠️ Done", summary, 1f))
 
             task.copy(
-                steps = completedSteps, status = if (success) AgentStatus.COMPLETED else AgentStatus.COMPLETED,
-                repoOwner = repoOwner, repoName = repoName, buildStatus = buildStatus, buildLog = buildLog,
-                result = AgentResult(success, summary, repoUrl?.let { extractUrl(it) }, allFiles.map { it.path }, allFiles.size,
-                    completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" },
-                    executionTime, buildStatus?.conclusion, fixAttempts)
+                steps = completedSteps,
+                status = if (success) AgentStatus.COMPLETED else AgentStatus.COMPLETED,
+                repoOwner = finalOwner,
+                repoName = finalName,
+                buildStatus = buildStatus,
+                buildLog = buildLog,
+                result = AgentResult(
+                    success = success,
+                    summary = summary,
+                    repoUrl = repoUrl?.let { extractUrl(it) },
+                    filesCreated = allFiles.map { it.path },
+                    totalFiles = allFiles.size,
+                    errors = completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" },
+                    executionTimeMs = executionTime,
+                    buildStatus = buildStatus?.conclusion,
+                    fixAttempts = fixAttempts
+                )
             )
         } catch (e: Exception) {
             Log.e(TAG, "❌ Agent crashed", e)
-            task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Crashed: ${e.localizedMessage}", errors = listOf(e.localizedMessage ?: "Crash"), executionTimeMs = System.currentTimeMillis() - startTime))
+            task.copy(
+                status = AgentStatus.FAILED,
+                result = AgentResult(false, "Crashed: ${e.localizedMessage}", errors = listOf(e.localizedMessage ?: "Crash"), executionTimeMs = System.currentTimeMillis() - startTime)
+            )
         }
     }
 
     // ═══════════════════════════════════════════
-    // Continue Failed Task (with build fix context)
+    // Continue Failed Task
     // ═══════════════════════════════════════════
 
     suspend fun continueFailedTask(
@@ -271,13 +301,12 @@ class AgentLoopManager(
     ): AgentTask {
         val contextPrompt = buildString {
             appendLine("Previous task: ${task.userRequest}")
-            appendLine("The build failed. Fix the code based on the errors below.")
-            if (task.buildLog != null) {
-                appendLine("Build errors:")
-                task.buildLog.errors.forEach { appendLine("  - $it") }
+            if (task.buildLog != null && task.buildLog.errors.isNotEmpty()) {
+                appendLine("Build errors (${task.buildLog.errors.size} total):")
+                task.buildLog.errors.take(10).forEach { appendLine("  - $it") }
             }
             if (additionalContext.isNotBlank()) {
-                appendLine("Additional instructions: $additionalContext")
+                appendLine("Instructions: $additionalContext")
             }
         }
         return executeAgentTask(contextPrompt, emptyList(), onProgress)
@@ -305,7 +334,7 @@ $contextBlock
 
 Return JSON array. Each item: {"description":"...","action":"GENERATE_CODE|REVIEW_CODE|PUSH_TO_GITHUB","language":"kotlin|python|xml|json|gradle|yaml"}
 
-Rules: Include ALL files (data, UI, API, config, build). One REVIEW_CODE. One PUSH_TO_GITHUB at end.
+Rules: Include ALL files. One REVIEW_CODE. One PUSH_TO_GITHUB at end.
 
 Example: [{"description":"Data class","action":"GENERATE_CODE","language":"kotlin"},{"description":"Review","action":"REVIEW_CODE","language":"kotlin"},{"description":"Push","action":"PUSH_TO_GITHUB","language":""}]
             """.trimIndent()
@@ -321,15 +350,17 @@ Example: [{"description":"Data class","action":"GENERATE_CODE","language":"kotli
             val cleaned = json.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             (0 until JSONArray(cleaned).length()).map { i ->
                 val obj = JSONArray(cleaned).getJSONObject(i)
-                AgentStep(description = obj.optString("description", "Step ${i + 1}"),
+                AgentStep(
+                    description = obj.optString("description", "Step ${i + 1}"),
                     action = try { StepAction.valueOf(obj.optString("action", "GENERATE_CODE")) } catch (e: Exception) { StepAction.GENERATE_CODE },
-                    language = obj.optString("language", "kotlin"))
+                    language = obj.optString("language", "kotlin")
+                )
             }
         } catch (e: Exception) { Log.e(TAG, "  ❌ Parse error", e); emptyList() }
     }
 
     // ═══════════════════════════════════════════
-    // Generate Code
+    // PHASE 2: Generate Code
     // ═══════════════════════════════════════════
 
     private suspend fun executeGenerateCode(step: AgentStep, userRequest: String, chatHistory: List<Message>): AgentStep {
@@ -337,11 +368,14 @@ Example: [{"description":"Data class","action":"GENERATE_CODE","language":"kotli
             val lang = step.language.ifBlank { "kotlin" }
             val response = geminiRepository.generateResponse(
                 prompt = "Write complete $lang code for: ${step.description}. Context: $userRequest. Return ONLY code.",
-                modelName = PLANNING_MODEL, chatHistory = chatHistory)
+                modelName = PLANNING_MODEL, chatHistory = chatHistory
+            )
             val name = extractFileName(step.description) ?: "file_${UUID.randomUUID().toString().take(6)}.$lang"
             val code = extractCodeBlock(response, lang) ?: response
             step.copy(status = StepStatus.COMPLETED, output = code, generatedFiles = listOf(GitHubAgent.FileInfo(path = name, content = code)))
-        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "Failed: ${e.localizedMessage}") }
+        } catch (e: Exception) {
+            step.copy(status = StepStatus.FAILED, output = "Failed: ${e.localizedMessage}")
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -396,14 +430,15 @@ jobs:
         return try {
             val allCode = completedSteps
                 .filter { it.action == StepAction.GENERATE_CODE && it.status == StepStatus.COMPLETED }
-                .joinToString("\n\n") { step ->
-                    step.generatedFiles.joinToString("\n") { "// File: ${it.path}\n${it.content}" }
+                .joinToString("\n\n") { s ->
+                    s.generatedFiles.joinToString("\n") { "// File: ${it.path}\n${it.content}" }
                 }
 
             val response = geminiRepository.generateResponse(
                 prompt = "Fix build errors in this code. Request: $userRequest\n\nCode:\n$allCode\n\nReturn the fixed files. Use ```language ... ``` for each file.",
-                modelName = PLANNING_MODEL)
-            
+                modelName = PLANNING_MODEL
+            )
+
             step.copy(status = StepStatus.COMPLETED, output = response)
         } catch (e: Exception) {
             step.copy(status = StepStatus.FAILED, output = "Fix failed: ${e.localizedMessage}")
@@ -448,15 +483,30 @@ jobs:
         steps: List<AgentStep>, success: Boolean, repoUrl: String?,
         buildStatus: BuildMonitor.BuildStatus?, fixAttempts: Int
     ): String = buildString {
+        val generatedCount = steps.count { it.status == StepStatus.COMPLETED && it.action == StepAction.GENERATE_CODE }
         appendLine(if (success) "✅ Task completed!" else "⚠️ Task completed with issues.")
         appendLine()
         appendLine("📊 Summary:")
-        appendLine("   📝 Files: ${steps.count { it.status == StepStatus.COMPLETED && it.action == StepAction.GENERATE_CODE }}")
-        appendLine("   🔧 Fix attempts: $fixAttempts")
-        if (buildStatus != null) appendLine("   🏗️ Build: ${buildStatus.conclusion ?: "unknown"}")
-        if (repoUrl != null) { appendLine(); appendLine("🔗 $repoUrl") }
+        appendLine("   📝 Files generated: $generatedCount")
+        if (fixAttempts > 0) appendLine("   🔧 Fix attempts: $fixAttempts")
+        if (buildStatus != null) {
+            val icon = when {
+                buildStatus.isSuccess -> "✅"
+                buildStatus.isFailure -> "❌"
+                else -> "⏳"
+            }
+            appendLine("   🏗️ Build: $icon ${buildStatus.conclusion ?: "unknown"}")
+        }
+        if (repoUrl != null) {
+            appendLine()
+            appendLine("🔗 $repoUrl")
+        }
+        appendLine()
+        appendLine("📁 Files:")
         steps.filter { it.generatedFiles.isNotEmpty() }.forEach { s ->
-            s.generatedFiles.forEach { appendLine("   📄 ${it.path}") }
+            s.generatedFiles.forEach { f ->
+                appendLine("   📄 ${f.path}")
+            }
         }
     }
 }

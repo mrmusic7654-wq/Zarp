@@ -42,7 +42,7 @@ fun MessageList(
 ) {
     val listState = rememberLazyListState()
 
-    // Auto-scroll to bottom on new messages
+    // Auto-scroll on new messages
     LaunchedEffect(messages.size, isAiThinking) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(0)
@@ -76,9 +76,9 @@ fun MessageList(
             ) { message ->
                 AnimatedVisibility(
                     visible = true,
-                    enter = fadeIn(animationSpec = tween(300)) +
-                            slideInVertically(animationSpec = tween(300)) { it / 2 } +
-                            scaleIn(animationSpec = tween(300), initialScale = 0.95f)
+                    enter = fadeIn(tween(300)) +
+                            slideInVertically(tween(300)) { it / 3 } +
+                            scaleIn(tween(300), initialScale = 0.97f)
                 ) {
                     if (message.isUser) {
                         UserMessageBubble(message = message)
@@ -116,77 +116,41 @@ fun MessageList(
 
 @Composable
 fun EmptyChatState(modifier: Modifier = Modifier) {
-    // Fade-in animation for empty state
-    val alpha by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(800, easing = FastOutSlowInEasing)
-    )
+    val alpha by animateFloatAsState(targetValue = 1f, animationSpec = tween(800, easing = FastOutSlowInEasing))
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .alpha(alpha),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    Box(modifier = modifier.fillMaxSize().alpha(alpha), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // Animated gradient icon
             val infiniteTransition = rememberInfiniteTransition(label = "empty_pulse")
             val scale by infiniteTransition.animateFloat(
-                initialValue = 0.95f,
-                targetValue = 1.05f,
-                animationSpec = infiniteRepeatable(
-                    tween(2000, easing = FastOutSlowInEasing),
-                    RepeatMode.Reverse
-                ),
-                label = "scale"
+                initialValue = 0.95f, targetValue = 1.05f,
+                animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "scale"
             )
 
             Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .scale(scale)
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(ZarpAccent, Color(0xFF4A9EFF), Color(0xFF7BC8FF))
-                        ),
-                        shape = CircleShape
-                    ),
+                modifier = Modifier.size(72.dp).scale(scale)
+                    .background(brush = Brush.linearGradient(listOf(ZarpAccent, Color(0xFF4A9EFF), Color(0xFF7BC8FF))), shape = CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Text("⚡", fontSize = 32.sp)
             }
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Zarp",
-                    color = ZarpTextPrimary,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp
-                )
+                Text("Zarp", color = ZarpTextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "How can I help you today?",
-                    color = ZarpTextTertiary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal
-                )
+                Text("How can I help you today?", color = ZarpTextTertiary, fontSize = 14.sp)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
             // Feature hints
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.alpha(0.6f)
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.alpha(0.6f)) {
                 FeatureHint("🌐", "Search")
                 FeatureHint("📎", "Upload")
                 FeatureHint("🎤", "Voice")
                 FeatureHint("🌍", "Translate")
+                FeatureHint("🤖", "Agent")
+                FeatureHint("🎮", "Auto")
             }
         }
     }
@@ -197,11 +161,6 @@ private fun FeatureHint(emoji: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(emoji, fontSize = 18.sp)
         Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = label,
-            color = ZarpTextTertiary,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium
-        )
+        Text(label, color = ZarpTextTertiary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }

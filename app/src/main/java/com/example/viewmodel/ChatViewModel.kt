@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AgentLoopManager
 import com.example.data.AndroidTTSManager
+import com.example.data.BuildMonitor
 import com.example.data.ChatRepository
 import com.example.data.CodeExecutionManager
 import com.example.data.GeminiRepository
@@ -54,7 +55,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val likedMessages: Set<String> = emptySet(),
         val dislikedMessages: Set<String> = emptySet(),
         val agentProgress: AgentLoopManager.AgentProgress? = null,
-        val agentTaskResult: AgentLoopManager.AgentResult? = null
+        val agentTaskResult: AgentLoopManager.AgentResult? = null,
+        // Build monitoring
+        val buildStatus: BuildMonitor.BuildStatus? = null,
+        val buildLog: BuildMonitor.BuildLog? = null,
+        val isFixingBuild: Boolean = false,
+        val showBuildNotification: Boolean = false,
+        val currentTask: AgentLoopManager.AgentTask? = null
     )
 
     companion object {
@@ -97,6 +104,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             gitHubAgent = gitHubAgent,
             context = application
         )
+    }
+
+    private val buildMonitor by lazy {
+        BuildMonitor(KeyManager.getGithubKey(application) ?: "")
     }
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -208,12 +219,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _uiState.value = _uiState.value.copy(
             messages = _uiState.value.messages + userMessage, inputText = "", isAiThinking = true, isPaused = false,
-            agentProgress = null, agentTaskResult = null
+            agentProgress = null, agentTaskResult = null, buildStatus = null, buildLog = null, showBuildNotification = false
         )
 
         currentGenerationJob = viewModelScope.launch {
             try {
-                // Save user message to conversation
                 conversationId?.let { chatRepository.addMessageToConversation(it, "🤖 Agent: $currentText", true) }
 
                 val task = agentLoopManager.executeAgentTask(
@@ -226,26 +236,69 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val responseText = task.result?.summary ?: "Agent task completed."
                 val aiMessage = Message(UUID.randomUUID().toString(), responseText, false, System.currentTimeMillis())
                 _uiState.value = _uiState.value.copy(
-                    messages = _uiState.value.messages + aiMessage, isAiThinking = false, agentTaskResult = task.result
+                    messages = _uiState.value.messages + aiMessage, isAiThinking = false,
+                    agentTaskResult = task.result, currentTask = task,
+                    buildStatus = task.buildStatus, buildLog = task.buildLog,
+                    showBuildNotification = task.buildStatus?.isFailure == true
                 )
 
-                // Save AI response to conversation
                 conversationId?.let { chatRepository.addMessageToConversation(it, responseText, false) }
 
-                // ── SAVE AS TASK ──
+                // Save as task
                 conversationId?.let { id ->
                     val taskTitle = if (currentText.length > 40) currentText.take(40) + "..." else currentText
                     chatRepository.saveConversationAsTask(id, taskTitle)
-                    // Also save messages to task storage
                     chatRepository.addTaskMessage(id, "🤖 Agent: $currentText", true)
                     chatRepository.addTaskMessage(id, responseText, false)
-                    Log.d("ChatVM", "🤖 Saved as task: $taskTitle")
                 }
 
                 lastUserPrompt = ""
             } catch (e: CancellationException) { _uiState.value = _uiState.value.copy(isAiThinking = false); throw e }
             catch (e: Exception) { Log.e("ChatVM", "Agent failed", e); _uiState.value = _uiState.value.copy(isAiThinking = false) }
         }
+    }
+
+    // ═══════════════════════════════════════════
+    // Build Fix Pipeline
+    // ═══════════════════════════════════════════
+
+    fun onFixAndRebuild() {
+        val task = _uiState.value.currentTask ?: return
+        val buildLog = _uiState.value.buildLog
+
+        _uiState.value = _uiState.value.copy(isFixingBuild = true, isAiThinking = true, showBuildNotification = false)
+
+        currentGenerationJob = viewModelScope.launch {
+            try {
+                val additionalContext = if (buildLog != null) {
+                    "Build errors:\n${buildLog.errors.joinToString("\n")}"
+                } else ""
+
+                val updatedTask = agentLoopManager.continueFailedTask(task, additionalContext) { progress ->
+                    _uiState.value = _uiState.value.copy(agentProgress = progress)
+                }
+
+                val responseText = updatedTask.result?.summary ?: "Fix applied."
+                val aiMessage = Message(UUID.randomUUID().toString(), responseText, false, System.currentTimeMillis())
+
+                _uiState.value = _uiState.value.copy(
+                    messages = _uiState.value.messages + aiMessage, isAiThinking = false, isFixingBuild = false,
+                    agentTaskResult = updatedTask.result, currentTask = updatedTask,
+                    buildStatus = updatedTask.buildStatus, buildLog = updatedTask.buildLog
+                )
+
+                // Save fix to conversation and task
+                _uiState.value.currentConversationId?.let { id ->
+                    chatRepository.addMessageToConversation(id, responseText, false)
+                    chatRepository.addTaskMessage(id, responseText, false)
+                }
+            } catch (e: CancellationException) { _uiState.value = _uiState.value.copy(isAiThinking = false, isFixingBuild = false); throw e }
+            catch (e: Exception) { Log.e("ChatVM", "Fix failed", e); _uiState.value = _uiState.value.copy(isAiThinking = false, isFixingBuild = false) }
+        }
+    }
+
+    fun onDismissBuildNotification() {
+        _uiState.value = _uiState.value.copy(showBuildNotification = false)
     }
 
     // ═══════════════════════════════════════════
@@ -260,20 +313,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch {
             try {
-                // Load from task-specific storage
                 val msgs = chatRepository.getTaskMessagesOnce(id)
                 if (msgs.isEmpty()) {
-                    // Fallback to conversation storage
                     val convMsgs = chatRepository.getMessagesForConversationOnce(id)
                     _uiState.value = _uiState.value.copy(messages = convMsgs)
                 } else {
                     _uiState.value = _uiState.value.copy(messages = msgs)
                 }
                 _uiState.value.messages.findLast { it.isUser }?.let { lastUserPrompt = it.text }
-                Log.d("ChatVM", "🤖 Loaded task: ${_uiState.value.messages.size} messages")
-            } catch (e: Exception) {
-                Log.e("ChatVM", "Failed to load task $id", e)
-            }
+            } catch (e: Exception) { Log.e("ChatVM", "Failed to load task $id", e) }
         }
     }
 
@@ -327,7 +375,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun onDismissTranslateDialog() { _uiState.value = _uiState.value.copy(showTranslateDialog = false, translateResult = null) }
     fun onUpdateTranslateLanguage(lang: String) { _uiState.value = _uiState.value.copy(translateLanguage = lang) }
 
-    fun onNewChat() { currentGenerationJob?.cancel(); currentGenerationJob = null; lastUserPrompt = ""; lastImageUris = emptyList(); _uiState.value = _uiState.value.copy(messages = emptyList(), currentConversationId = null, isDrawerOpen = false, inputText = "", selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList(), isAiThinking = false, isPaused = false, agentProgress = null, agentTaskResult = null) }
+    fun onNewChat() { currentGenerationJob?.cancel(); currentGenerationJob = null; lastUserPrompt = ""; lastImageUris = emptyList(); _uiState.value = _uiState.value.copy(messages = emptyList(), currentConversationId = null, isDrawerOpen = false, inputText = "", selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList(), isAiThinking = false, isPaused = false, agentProgress = null, agentTaskResult = null, buildStatus = null, buildLog = null, showBuildNotification = false) }
     fun onSelectConversation(id: String) { currentGenerationJob?.cancel(); currentGenerationJob = null; _uiState.value = _uiState.value.copy(currentConversationId = id, isDrawerOpen = false, isAiThinking = false, isPaused = false, messages = emptyList()); viewModelScope.launch { try { val msgs = chatRepository.getMessagesForConversationOnce(id); _uiState.value = _uiState.value.copy(messages = msgs); msgs.findLast { it.isUser }?.let { lastUserPrompt = it.text } } catch (e: Exception) {} } }
     fun onDeleteConversation(id: String) { viewModelScope.launch { chatRepository.deleteConversation(id); if (_uiState.value.currentConversationId == id) onNewChat() } }
 

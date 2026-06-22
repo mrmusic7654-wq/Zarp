@@ -1,9 +1,13 @@
 package com.example.data
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -97,9 +101,8 @@ class DeviceController(private val context: Context) {
             val result = executeAction(action, retryCount)
             results.add(result)
 
-            if (result.success) {
-                consecutiveFailures = 0
-            } else {
+            if (result.success) consecutiveFailures = 0
+            else {
                 consecutiveFailures++
                 if (consecutiveFailures >= 3) {
                     Log.w(TAG, "⚠️ Too many consecutive failures, stopping sequence")
@@ -131,9 +134,7 @@ class DeviceController(private val context: Context) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // Action Implementations
-    // ═══════════════════════════════════════════
+    // ── Action implementations ──
 
     private suspend fun executeTap(action: DeviceAction): ActionResult {
         return if (action.target != null) {
@@ -142,11 +143,9 @@ class DeviceController(private val context: Context) {
             val service = accessibilityService ?: return ActionResult(false, "No service")
             val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")
             val node = findNodeAtCoordinates(root, action.x, action.y)
-            val result = if (node != null && node.isClickable) {
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            } else false
+            val result = if (node != null && node.isClickable) node.performAction(AccessibilityNodeInfo.ACTION_CLICK) else false
             root.recycle()
-            if (result) ActionResult(true, "Tapped (${action.x},${action.y})") else ActionResult(false, "Nothing clickable at coordinates")
+            if (result) ActionResult(true, "Tapped (${action.x},${action.y})") else ActionResult(false, "Nothing clickable")
         } else ActionResult(false, "No target or coordinates")
     }
 
@@ -154,22 +153,16 @@ class DeviceController(private val context: Context) {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")
         val node = if (action.target != null) findNodeByText(root, action.target) else findNodeAtCoordinates(root, action.x ?: 540, action.y ?: 960)
-        val result = if (node != null) {
-            node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
-        } else false
+        val result = node?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) ?: false
         root.recycle()
-        if (result) ActionResult(true, "Long pressed") else ActionResult(false, "Long press failed")
+        return if (result) ActionResult(true, "Long pressed") else ActionResult(false, "Long press failed")
     }
 
     private suspend fun executeSwipe(x1: Int, y1: Int, x2: Int, y2: Int, duration: Int): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
-        val result = service.dispatchGesture(
-            android.accessibilityservice.GestureDescription.Builder()
-                .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(
-                    android.graphics.Path().apply { moveTo(x1.toFloat(), y1.toFloat()); lineTo(x2.toFloat(), y2.toFloat()) },
-                    0, duration.toLong()
-                )).build(), null, null
-        )
+        val path = Path().apply { moveTo(x1.toFloat(), y1.toFloat()); lineTo(x2.toFloat(), y2.toFloat()) }
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration.toLong())).build()
+        val result = service.dispatchGesture(gesture, null, null)
         return if (result) ActionResult(true, "Swiped") else ActionResult(false, "Swipe failed")
     }
 
@@ -177,16 +170,11 @@ class DeviceController(private val context: Context) {
         if (text.isBlank()) return ActionResult(false, "No text")
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")
-        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         val result = if (focused != null) {
-            val args = android.os.Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+            val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
             focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        } else {
-            // Fallback: set clipboard + paste
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("zarp", text))
-            false // Paste requires more complex gesture
-        }
+        } else false
         root.recycle()
         return if (result) ActionResult(true, "Typed text") else ActionResult(false, "Type failed — tap an input field first")
     }
@@ -199,17 +187,10 @@ class DeviceController(private val context: Context) {
                 context.startActivity(intent)
                 ActionResult(true, "Opened $packageName")
             } else {
-                // Try monkey command
-                try {
-                    Runtime.getRuntime().exec("monkey -p $packageName 1")
-                    ActionResult(true, "Opened via monkey")
-                } catch (e: Exception) {
-                    ActionResult(false, "App not found: $packageName")
-                }
+                try { Runtime.getRuntime().exec("monkey -p $packageName 1"); ActionResult(true, "Opened via monkey") }
+                catch (e: Exception) { ActionResult(false, "App not found: $packageName") }
             }
-        } catch (e: Exception) {
-            ActionResult(false, "Open failed: ${e.localizedMessage}")
-        }
+        } catch (e: Exception) { ActionResult(false, "Open failed: ${e.localizedMessage}") }
     }
 
     private fun executeGlobalAction(action: Int, label: String): ActionResult {
@@ -221,17 +202,9 @@ class DeviceController(private val context: Context) {
     private fun executeScreenshot(): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         return try {
-            service.takeScreenshot(
-                android.os.Handler(Looper.getMainLooper())
-            ) { screenshot ->
-                if (screenshot != null) {
-                    Log.d(TAG, "📸 Screenshot captured")
-                }
-            }
+            service.takeScreenshot(android.os.Handler(Looper.getMainLooper())) { _ -> }
             ActionResult(true, "Screenshot requested")
-        } catch (e: Exception) {
-            ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
-        }
+        } catch (e: Exception) { ActionResult(false, "Screenshot failed: ${e.localizedMessage}") }
     }
 
     private suspend fun executeScroll(up: Boolean): ActionResult {
@@ -249,25 +222,17 @@ class DeviceController(private val context: Context) {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")
         val node = findNodeByText(root, target)
-        val result = if (node != null && node.isClickable) {
-            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        } else if (node != null) {
-            // Try parent if node itself isn't clickable
-            var parent = node.parent
-            var clicked = false
-            while (parent != null && !clicked) {
-                clicked = parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                parent = parent.parent
-            }
+        val result = if (node != null && node.isClickable) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        else if (node != null) {
+            var parent = node.parent; var clicked = false
+            while (parent != null && !clicked) { clicked = parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK); parent = parent.parent }
             clicked
         } else false
         root.recycle()
         return if (result) ActionResult(true, "Tapped '$target'") else ActionResult(false, "Could not find '$target'")
     }
 
-    // ═══════════════════════════════════════════
-    // Screen Reading
-    // ═══════════════════════════════════════════
+    // ── Screen reading ──
 
     suspend fun readScreen(): String? = withContext(Dispatchers.IO) {
         val root = getRootNode() ?: return@withContext null
@@ -281,24 +246,14 @@ class DeviceController(private val context: Context) {
         val sb = StringBuilder()
         val text = node.text?.toString()?.trim()
         val desc = node.contentDescription?.toString()?.trim()
-        val isClickable = node.isClickable
-        val isEditable = node.isEditable
-        val prefix = when {
-            isEditable -> "[INPUT] "
-            isClickable -> "[BTN] "
-            else -> ""
-        }
+        val prefix = when { node.isEditable -> "[INPUT] "; node.isClickable -> "[BTN] "; else -> "" }
         if (!text.isNullOrBlank()) sb.appendLine("${"  ".repeat(depth)}$prefix$text")
         if (!desc.isNullOrBlank() && desc != text) sb.appendLine("${"  ".repeat(depth)}($desc)")
-        for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { sb.append(extractNodeText(it, depth + 1)) }
-        }
+        for (i in 0 until node.childCount) node.getChild(i)?.let { sb.append(extractNodeText(it, depth + 1)) }
         return sb.toString()
     }
 
-    // ═══════════════════════════════════════════
-    // Node Helpers
-    // ═══════════════════════════════════════════
+    // ── Node helpers ──
 
     private fun getRootNode(): AccessibilityNodeInfo? {
         val service = accessibilityService ?: return null
@@ -306,59 +261,57 @@ class DeviceController(private val context: Context) {
         var waited = 0L
         while (root == null && waited < UI_TIMEOUT_MS) {
             root = service.rootInActiveWindow
-            if (root == null) {
-                try { Thread.sleep(200) } catch (e: InterruptedException) { break }
-                waited += 200
-            }
+            if (root == null) { try { Thread.sleep(200) } catch (e: InterruptedException) { break }; waited += 200 }
         }
         return root
     }
 
     private fun findNodeByText(root: AccessibilityNodeInfo, text: String): AccessibilityNodeInfo? {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
+        val queue = ArrayDeque<AccessibilityNodeInfo>(); queue.add(root)
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            val nodeText = node.text?.toString()?.trim() ?: ""
-            val nodeDesc = node.contentDescription?.toString()?.trim() ?: ""
-            if (nodeText.contains(text, ignoreCase = true) || nodeDesc.contains(text, ignoreCase = true)) return node
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
+            if (node.text?.toString()?.contains(text, true) == true || node.contentDescription?.toString()?.contains(text, true) == true) return node
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
         }
         return null
     }
 
     private fun findScrollableNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
+        val queue = ArrayDeque<AccessibilityNodeInfo>(); queue.add(root)
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
             if (node.isScrollable) return node
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
         }
         return null
     }
 
     private fun findNodeAtCoordinates(root: AccessibilityNodeInfo, x: Int, y: Int): AccessibilityNodeInfo? {
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
+        val queue = ArrayDeque<AccessibilityNodeInfo>(); queue.add(root)
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
-            val rect = android.graphics.Rect()
-            node.getBoundsInScreen(rect)
+            val rect = Rect(); node.getBoundsInScreen(rect)
             if (rect.contains(x, y) && node.isVisibleToUser) return node
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
         }
         return null
     }
 
-    fun cleanup() {
-        accessibilityService = null
-        Log.d(TAG, "🧹 Cleaned up")
+    fun cleanup() { accessibilityService = null; Log.d(TAG, "🧹 Cleaned up") }
+}
+
+// ═══════════════════════════════════════════
+// Accessibility Service
+// ═══════════════════════════════════════════
+
+class ZarpAccessibilityService : AccessibilityService() {
+    companion object {
+        var instance: ZarpAccessibilityService? = null
+            private set
     }
+
+    override fun onServiceConnected() { super.onServiceConnected(); instance = this }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onInterrupt() {}
+    override fun onUnbind(intent: Intent?): Boolean { instance = null; return super.onUnbind(intent) }
 }

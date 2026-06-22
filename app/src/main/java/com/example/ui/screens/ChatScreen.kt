@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AgentLoopManager
+import com.example.data.BuildMonitor
 import com.example.data.KeyManager
 import com.example.data.UsageTracker
 import com.example.ui.components.AttachmentSheet
@@ -77,6 +78,7 @@ fun ChatScreen(
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
+    // ── Attachment Sheet ──
     if (uiState.showAttachmentSheet) {
         AttachmentSheet(
             onDismiss = { viewModel.dismissAttachmentSheet() },
@@ -87,6 +89,7 @@ fun ChatScreen(
         )
     }
 
+    // ── Style Dialog ──
     if (uiState.showStyleDialog) {
         var styleText by remember { mutableStateOf(uiState.customStyle) }
         AlertDialog(
@@ -99,12 +102,9 @@ fun ChatScreen(
                     OutlinedTextField(value = styleText, onValueChange = { styleText = it },
                         placeholder = { Text("e.g. Be brutally honest, roast me.", color = ZarpTextTertiary, fontSize = 12.sp) },
                         modifier = Modifier.fillMaxWidth().height(120.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = ZarpTextPrimary, unfocusedTextColor = ZarpTextPrimary, focusedBorderColor = ZarpAccent, unfocusedBorderColor = ZarpInputBorder, cursorColor = ZarpAccent),
-                        minLines = 3)
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = ZarpTextPrimary, unfocusedTextColor = ZarpTextPrimary, focusedBorderColor = ZarpAccent, unfocusedBorderColor = ZarpInputBorder, cursorColor = ZarpAccent), minLines = 3)
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = { viewModel.onCustomStyleChanged(""); viewModel.onDismissStyleDialog() }) {
-                        Text("🔄 Reset to default", color = ZarpTextTertiary)
-                    }
+                    TextButton(onClick = { viewModel.onCustomStyleChanged(""); viewModel.onDismissStyleDialog() }) { Text("🔄 Reset to default", color = ZarpTextTertiary) }
                 }
             },
             confirmButton = { Button(onClick = { viewModel.onCustomStyleChanged(styleText); viewModel.onDismissStyleDialog() }, colors = ButtonDefaults.buttonColors(containerColor = ZarpAccent)) { Text("✅ Apply", color = Color.White) } },
@@ -113,6 +113,7 @@ fun ChatScreen(
         )
     }
 
+    // ── Translate Dialog ──
     if (uiState.showTranslateDialog && uiState.translateResult != null) {
         AlertDialog(
             onDismissRequest = { viewModel.onDismissTranslateDialog() },
@@ -128,15 +129,12 @@ fun ChatScreen(
         drawerContent = {
             Box(modifier = Modifier.width(drawerWidth)) {
                 SidebarDrawer(
-                    conversations = uiState.conversations,
-                    currentConversationId = uiState.currentConversationId,
+                    conversations = uiState.conversations, currentConversationId = uiState.currentConversationId,
                     onNewChat = { viewModel.onNewChat(); scope.launch { drawerState.close() } },
                     onSelectConversation = { viewModel.onSelectConversation(it); scope.launch { drawerState.close() } },
                     onDeleteConversation = { viewModel.onDeleteConversation(it) },
                     onSettingsTap = { scope.launch { drawerState.close() }; onNavigateToSettings() },
-                    // ── Task History ──
-                    tasks = uiState.tasks,
-                    onSelectTask = { viewModel.onSelectTask(it); scope.launch { drawerState.close() } },
+                    tasks = uiState.tasks, onSelectTask = { viewModel.onSelectTask(it); scope.launch { drawerState.close() } },
                     onDeleteTask = { viewModel.onDeleteTask(it) }
                 )
             }
@@ -148,10 +146,7 @@ fun ChatScreen(
                 TopAppBar(
                     title = {
                         Box {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable { showModelSelector = true }.padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { showModelSelector = true }.padding(horizontal = 8.dp, vertical = 4.dp)) {
                                 Text(uiState.selectedModel, color = ZarpTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Icon(Icons.Default.ExpandMore, "Model", tint = ZarpAccent, modifier = Modifier.padding(start = 2.dp).size(16.dp))
                             }
@@ -163,9 +158,7 @@ fun ChatScreen(
                                             Text(model, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (uiState.selectedModel == model) ZarpAccent else ZarpTextPrimary)
                                             Text("$used / $limit today", fontSize = 10.sp, color = ZarpTextTertiary)
                                             Spacer(modifier = Modifier.height(2.dp))
-                                            Box(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(Color(0xFF444444))) {
-                                                Box(Modifier.fillMaxWidth(percentage / 100f).height(2.dp).clip(RoundedCornerShape(1.dp)).background(when { percentage > 80 -> Color(0xFFFF5252); percentage > 50 -> Color(0xFFFFC107); else -> ZarpAccent }))
-                                            }
+                                            Box(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(Color(0xFF444444))) { Box(Modifier.fillMaxWidth(percentage / 100f).height(2.dp).clip(RoundedCornerShape(1.dp)).background(when { percentage > 80 -> Color(0xFFFF5252); percentage > 50 -> Color(0xFFFFC107); else -> ZarpAccent })) }
                                         }
                                     }, onClick = { viewModel.onModelSelected(model); showModelSelector = false })
                                 }
@@ -176,9 +169,7 @@ fun ChatScreen(
                     actions = {
                         AnimatedVisibility(visible = uiState.isAiThinking || uiState.isPaused, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
                             IconButton(onClick = { viewModel.onStopGeneration() }) {
-                                Box(Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFFF5252)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Stop, "Stop", tint = Color.White, modifier = Modifier.size(14.dp))
-                                }
+                                Box(Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFFFF5252)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Stop, "Stop", tint = Color.White, modifier = Modifier.size(14.dp)) }
                             }
                         }
                         IconButton(onClick = { viewModel.onShowStyleDialog() }) { Icon(Icons.Outlined.AutoAwesome, "Style", tint = if (uiState.customStyle.isNotBlank()) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(18.dp)) }
@@ -191,7 +182,91 @@ fun ChatScreen(
         ) { paddingValues ->
             Column(Modifier.fillMaxSize().padding(paddingValues)) {
 
-                // ── Agent Progress Panel (collapsible) ──
+                // ══════════════════════════════════════
+                // BUILD FAILED NOTIFICATION
+                // ══════════════════════════════════════
+                AnimatedVisibility(
+                    visible = uiState.showBuildNotification && uiState.buildStatus?.isFailure == true,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2D0D0D)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("❌", fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Build Failed", color = Color(0xFFFF5252), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("${uiState.buildLog?.errors?.size ?: 0} errors found", color = Color(0xFFFF8A80), fontSize = 11.sp)
+                                }
+                                IconButton(onClick = { viewModel.onDismissBuildNotification() }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, "Dismiss", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                                }
+                            }
+
+                            // Show first 3 errors
+                            uiState.buildLog?.errors?.take(3)?.forEach { error ->
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(error.take(120), color = Color(0xFFFFCDD2), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Fix & Rebuild button
+                            Button(
+                                onClick = { viewModel.onFixAndRebuild() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !uiState.isFixingBuild
+                            ) {
+                                if (uiState.isFixingBuild) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Fixing...", color = Color.White)
+                                } else {
+                                    Icon(Icons.Default.Build, "Fix", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("🔧 Fix & Rebuild", color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ══════════════════════════════════════
+                // BUILD SUCCESS NOTIFICATION
+                // ══════════════════════════════════════
+                AnimatedVisibility(
+                    visible = uiState.showBuildNotification && uiState.buildStatus?.isSuccess == true,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D2D0D)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("✅", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Build Passed!", color = Color(0xFF00E676), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            IconButton(onClick = { viewModel.onDismissBuildNotification() }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, "Dismiss", tint = Color(0xFF00E676), modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                // ══════════════════════════════════════
+                // AGENT PROGRESS PANEL (collapsible)
+                // ══════════════════════════════════════
                 AnimatedVisibility(
                     visible = uiState.isAgentMode && uiState.agentProgress != null,
                     enter = expandVertically() + fadeIn(),
@@ -227,7 +302,9 @@ fun ChatScreen(
                     }
                 }
 
-                // ── Messages ──
+                // ══════════════════════════════════════
+                // MESSAGES
+                // ══════════════════════════════════════
                 MessageList(
                     messages = uiState.messages, isAiThinking = uiState.isAiThinking, modifier = Modifier.weight(1f),
                     speakingMessageId = uiState.speakingMessageId,
@@ -241,7 +318,9 @@ fun ChatScreen(
                     searchEngines = emptyMap()
                 )
 
-                // ── Input Bar ──
+                // ══════════════════════════════════════
+                // INPUT BAR
+                // ══════════════════════════════════════
                 InputBar(
                     inputText = uiState.inputText, onInputChanged = { viewModel.onInputChanged(it) },
                     onSend = { viewModel.onSend() }, onMicTap = { viewModel.onStartVoiceInput(voiceLauncher) },

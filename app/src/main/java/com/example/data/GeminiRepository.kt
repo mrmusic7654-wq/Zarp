@@ -11,6 +11,7 @@ import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class GeminiRepository(private val context: Context) {
 
@@ -18,13 +19,15 @@ class GeminiRepository(private val context: Context) {
         private const val TAG = "GeminiRepo"
         private const val MAX_OUTPUT_TOKENS = 8192
         private const val IMAGE_MAX_DIMENSION = 2048
+        private const val MAX_RETRIES = 2
+        private const val RETRY_DELAY_MS = 1000L
     }
 
     private val fullContextCount = 5
     private val embeddingManager = EmbeddingManager(context)
 
     // ═══════════════════════════════════════════
-    // Model Factory
+    // Model Factory with Retry
     // ═══════════════════════════════════════════
 
     private fun getModel(modelName: String, customStyle: String = ""): GenerativeModel? {
@@ -33,7 +36,6 @@ class GeminiRepository(private val context: Context) {
             Log.e(TAG, "❌ Gemini API key is null or empty")
             return null
         }
-
         return GenerativeModel(
             modelName = modelName,
             apiKey = key,
@@ -47,149 +49,58 @@ class GeminiRepository(private val context: Context) {
         )
     }
 
-    // ═══════════════════════════════════════════
-    // Elite System Prompt
-    // ═══════════════════════════════════════════
-
     private fun buildSystemPrompt(customStyle: String): String {
-        return if (customStyle.isNotBlank()) {
-            "You are Zarp. $customStyle"
-        } else {
-            """
-You are Zarp — an elite, highly intelligent AI assistant. Your responses are consistently polished, insightful, and beautifully formatted.
+        if (customStyle.isNotBlank()) return "You are Zarp. $customStyle"
+        return """
+You are Zarp — an elite, highly intelligent AI assistant.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 RESPONSE ARCHITECTURE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 RESPONSE RULES:
+- Lead with the direct answer in 1-2 sentences
+- Keep paragraphs short (2-3 sentences max)
+- Use **bold** only for 2-3 key terms per response
+- Use • bullets and 1. numbered lists naturally
+- Use ```language for code blocks with language tag
+- Use markdown tables for comparisons
+- Use [THINKING]...[/THINKING] for step-by-step reasoning
 
-1. LEAD WITH THE ANSWER. Give the direct answer in the first 1-2 sentences. Never bury the key information.
+🌐 SOURCE CITATIONS (web search):
+[Source: Page Title](https://url.com)
+Each source on its own line at the end. NEVER use inline (url).
 
-2. ELABORATE WITH STRUCTURE. After the direct answer, organize supporting details using clean formatting.
+🚫 NEVER:
+- Markdown headers (##, ###)
+- Inline URLs for sources
+- Walls of text without breaks
+- "As an AI language model..."
+- Fabricated facts or URLs
 
-3. END WITH VALUE. Close with a follow-up question, helpful tip, or next-step suggestion.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 FORMATTING RULES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-TEXT EMPHASIS:
-- Use **bold** ONLY for the 2-3 most important terms in your entire response. Never bold entire sentences.
-- Use *italic* for book titles, movie names, or light emphasis. Never overuse.
-- Keep paragraphs SHORT — 2-3 sentences maximum. White space is your friend.
-
-LISTS:
-- Use • bullet points for features, options, or related items. Put a blank line before the first bullet.
-- Use 1. 2. 3. numbered lists for steps, sequences, or rankings.
-- Keep each bullet to 1-2 lines. No giant paragraphs inside bullets.
-
-CODE:
-- ALWAYS wrap code in triple backticks WITH language tag: ```kotlin, ```python, ```javascript
-- Put a brief 1-line explanation BEFORE the code block explaining what it does.
-- For inline code references, use single backticks: `functionName()`
-
-TABLES:
-- Use markdown tables for comparing things side-by-side.
-- Add a blank line before AND after every table.
-- Keep table columns narrow and scannable.
-
-HEADERS:
-- NEVER use markdown headers (##, ###). Use bold text or emoji separators instead.
-- Example: "**Key Features**" not "## Key Features"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🧠 DEEP REASONING
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-For complex problems requiring step-by-step logic:
-[THINKING]
-Your detailed reasoning process — step by step, showing your work.
-[/THINKING]
-
-Then provide the polished final answer below.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌐 SOURCE CITATIONS (WHEN USING WEB SEARCH)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-YOU MUST cite every source at the end of your response using EXACTLY this format:
-[Source: Page Title](https://full-url.com)
-
-Place each source on its own line. NEVER use inline (url) format.
-
-Example:
-[Source: Red Panda Facts](https://animals.sandiegozoo.org/red-panda)
-[Source: WWF Red Panda](https://worldwildlife.org/species/red-panda)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ TONE & PERSONALITY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-- Be WARM and HUMAN. Write like a brilliant, friendly expert — not a textbook.
-- Match the user's energy. Casual if they're casual, professional if they're professional.
-- Use emojis NATURALLY — 1-2 per paragraph max. Never force them.
-- Be CONCISE but THOROUGH. Answer the question fully, then stop.
-- If you don't know something, say "I'm not sure about that, but here's what I do know..."
-- NEVER fabricate facts, URLs, or statistics.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚫 ABSOLUTE BANS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-- NO markdown headers (##, ###, ####)
-- NO inline (url) format for sources — always [Source: title](url)
-- NO walls of text without paragraph breaks
-- NO robotic phrases like "As an AI language model..."
-- NO overuse of bold/italic
-- NO fabricated data or hallucinated URLs
-- NO generic closings like "Hope this helps!" — be specific
-
-Your goal: Every response should feel like it was hand-crafted by a thoughtful, intelligent human who genuinely wants to help.
-            """.trimIndent()
-        }
+Be warm, direct, and helpful. Answer like a knowledgeable friend.
+        """.trimIndent()
     }
 
     // ═══════════════════════════════════════════
-    // Smart Context Builder
+    // Context Builder
     // ═══════════════════════════════════════════
 
     private suspend fun buildContext(history: List<Message>, currentPrompt: String): String {
         if (history.isEmpty()) return ""
-
-        val relevant = embeddingManager.searchSimilar(currentPrompt, topK = 3)
-        val relevantSet = relevant.toSet()
         val sb = StringBuilder()
-
         val recent = history.takeLast(fullContextCount)
         for (msg in recent) {
-            val role = if (msg.isUser) "👤 User" else "🤖 Zarp"
-            sb.appendLine("$role: ${msg.text}")
+            sb.appendLine("${if (msg.isUser) "User" else "Zarp"}: ${msg.text}")
         }
-
-        val olderRelevant = history.filter { it.text in relevantSet && it !in recent }
-        if (olderRelevant.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("── Related earlier context ──")
-            for (msg in olderRelevant) {
-                val role = if (msg.isUser) "User" else "Zarp"
-                sb.appendLine("$role: ${msg.text.take(200)}")
-            }
-            sb.appendLine("── End related context ──")
-            sb.appendLine()
-        }
-
-        val rest = history.filter { it !in recent && it !in olderRelevant }
+        val rest = history.dropLast(fullContextCount)
         if (rest.isNotEmpty()) {
-            val userTopics = rest.filter { it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
-            val aiTopics = rest.filter { !it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
-            if (userTopics.isNotBlank()) sb.appendLine("📋 User asked: $userTopics")
-            if (aiTopics.isNotBlank()) sb.appendLine("💬 Zarp answered: $aiTopics")
+            val u = rest.filter { it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
+            val a = rest.filter { !it.isUser }.map { it.text.take(60) }.distinct().joinToString("; ")
+            if (u.isNotBlank()) sb.appendLine("User asked: $u")
+            if (a.isNotBlank()) sb.appendLine("Zarp answered: $a")
         }
-
         return sb.toString().trim()
     }
 
     // ═══════════════════════════════════════════
-    // Public API: Generate Response
+    // Generate Response with Retry
     // ═══════════════════════════════════════════
 
     suspend fun generateResponse(
@@ -199,145 +110,71 @@ Your goal: Every response should feel like it was hand-crafted by a thoughtful, 
         customStyle: String = "",
         useSearch: Boolean = false
     ): String {
-        return if (useSearch) {
-            generateWithSearch(prompt, modelName, chatHistory, customStyle)
-        } else {
-            generateBasic(prompt, modelName, chatHistory, customStyle)
+        return withRetry("generate") {
+            if (useSearch) generateWithSearch(prompt, modelName, chatHistory, customStyle)
+            else generateBasic(prompt, modelName, chatHistory, customStyle)
         }
     }
-
-    // ═══════════════════════════════════════════
-    // Basic Generation
-    // ═══════════════════════════════════════════
 
     private suspend fun generateBasic(
-        prompt: String,
-        modelName: String,
-        chatHistory: List<Message>,
-        customStyle: String
+        prompt: String, modelName: String, chatHistory: List<Message>, customStyle: String
     ): String = withContext(Dispatchers.IO) {
         val model = getModel(modelName, customStyle)
-            ?: return@withContext "⚠️ **API key not set.**\nGo to Settings → API Keys to add your Gemini key."
+            ?: return@withContext "⚠️ API key not set. Go to Settings → API Keys."
 
-        try {
-            val contextBlock = buildContext(chatHistory, prompt)
-            Log.d(TAG, "📤 $modelName | ${chatHistory.size} msg history | ${prompt.take(60)}...")
+        val contextBlock = buildContext(chatHistory, prompt)
+        val response = model.generateContent(content {
+            if (contextBlock.isNotBlank()) text(contextBlock)
+            text(prompt)
+        })
 
-            val response = model.generateContent(content {
-                if (contextBlock.isNotBlank()) text(contextBlock)
-                text(prompt)
-            })
-
-            val rawText = response.text
-            if (rawText.isNullOrBlank()) {
-                Log.w(TAG, "⚠️ Empty response from $modelName")
-                return@withContext "⚠️ I couldn't generate a response. Please try again."
-            }
-
-            Log.d(TAG, "📥 Response: ${rawText.take(100)}...")
-            rawText
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ $modelName failed", e)
-            handleApiError(e, modelName)
-        }
+        val text = response.text
+        if (text.isNullOrBlank()) return@withContext "⚠️ Empty response. Please try again."
+        text
     }
-
-    // ═══════════════════════════════════════════
-    // Search-Powered Generation (ALL MODELS)
-    // ═══════════════════════════════════════════
 
     private suspend fun generateWithSearch(
-        prompt: String,
-        modelName: String,
-        chatHistory: List<Message>,
-        customStyle: String
+        prompt: String, modelName: String, chatHistory: List<Message>, customStyle: String
     ): String = withContext(Dispatchers.IO) {
         val model = getModel(modelName, customStyle)
-            ?: return@withContext "⚠️ **API key not set.**"
+            ?: return@withContext "⚠️ API key not set."
 
-        try {
-            Log.d(TAG, "🔍 Fetching web data for: ${prompt.take(60)}...")
+        val searchContext = try {
+            WebSearchManager.searchForContext(prompt, context)
+        } catch (e: Exception) { "" }
 
-            val searchContext = WebSearchManager.searchForContext(
-                query = prompt,
-                context = context,
-                fetchContent = false
-            )
-
-            val historyBlock = buildContext(chatHistory, prompt)
-            val fullPrompt = buildString {
-                if (searchContext.isNotBlank()) {
-                    appendLine(searchContext)
-                    appendLine()
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine("🚨 MANDATORY SOURCE CITATION — DO NOT SKIP 🚨")
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine()
-                    appendLine("You MUST end your response with EVERY source listed in EXACTLY this format:")
-                    appendLine()
-                    appendLine("[Source: Exact Page Title](https://exact-url.com)")
-                    appendLine()
-                    appendLine("Example:")
-                    appendLine("[Source: Red Panda Facts](https://animals.sandiegozoo.org/red-panda)")
-                    appendLine("[Source: WWF Red Panda](https://worldwildlife.org/species/red-panda)")
-                    appendLine()
-                    appendLine("⚠️ CRITICAL RULES:")
-                    appendLine("- Include EVERY source from the search results above")
-                    appendLine("- Each source on its OWN line at the VERY END of your response")
-                    appendLine("- Use EXACTLY [Source: title](url) format — nothing else")
-                    appendLine("- NEVER use inline (url) — the app will break")
-                    appendLine("- This is NOT optional — the app requires this format")
-                    appendLine()
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine()
-                }
-                if (historyBlock.isNotBlank()) {
-                    appendLine(historyBlock)
-                    appendLine()
-                }
-                appendLine("User: $prompt")
+        val historyBlock = buildContext(chatHistory, prompt)
+        val fullPrompt = buildString {
+            if (searchContext.isNotBlank()) {
+                appendLine(searchContext)
+                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
+                appendLine("Cite sources as: [Source: Title](https://url)")
+                appendLine("━━━━━━━━━━━━━━━━━━━━━━━")
             }
-
-            Log.d(TAG, "📤 Search-enriched prompt (${fullPrompt.length} chars)")
-            val response = model.generateContent(content { text(fullPrompt) })
-
-            val rawText = response.text ?: "No response."
-            Log.d(TAG, "📥 Search response: ${rawText.take(100)}...")
-            rawText
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Search generation failed", e)
-            handleApiError(e, modelName)
+            if (historyBlock.isNotBlank()) appendLine(historyBlock)
+            appendLine("User: $prompt")
         }
+
+        val response = model.generateContent(content { text(fullPrompt) })
+        response.text ?: "⚠️ No response."
     }
 
     // ═══════════════════════════════════════════
-    // Image Generation
+    // Image Response
     // ═══════════════════════════════════════════
 
     suspend fun generateResponseWithImage(
-        prompt: String,
-        imageUri: Uri,
-        modelName: String,
-        chatHistory: List<Message> = emptyList(),
-        customStyle: String = ""
-    ): String = withContext(Dispatchers.IO) {
-        val model = getModel(modelName, customStyle)
-            ?: return@withContext "⚠️ **API key not set.**"
+        prompt: String, imageUri: Uri, modelName: String,
+        chatHistory: List<Message> = emptyList(), customStyle: String = ""
+    ): String = withRetry("image") {
+        withContext(Dispatchers.IO) {
+            val model = getModel(modelName, customStyle)
+                ?: return@withContext "⚠️ API key not set."
 
-        try {
-            Log.d(TAG, "📸 Processing image with $modelName")
+            val bitmap = context.contentResolver.openInputStream(imageUri)?.use { BitmapFactory.decodeStream(it) }
+                ?: return@withContext "❌ Cannot read image. Try JPEG or PNG."
 
-            val inputStream = context.contentResolver.openInputStream(imageUri)
-            if (inputStream == null) {
-                return@withContext "❌ Cannot read the image file."
-            }
-
-            val bitmap = inputStream.use { BitmapFactory.decodeStream(it) }
-            if (bitmap == null) {
-                return@withContext "❌ Unsupported image format. Try JPEG or PNG."
-            }
-
-            val processedBitmap = if (bitmap.width > IMAGE_MAX_DIMENSION || bitmap.height > IMAGE_MAX_DIMENSION) {
+            val processed = if (bitmap.width > IMAGE_MAX_DIMENSION || bitmap.height > IMAGE_MAX_DIMENSION) {
                 val ratio = minOf(IMAGE_MAX_DIMENSION.toFloat() / bitmap.width, IMAGE_MAX_DIMENSION.toFloat() / bitmap.height)
                 Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
             } else bitmap
@@ -347,57 +184,57 @@ Your goal: Every response should feel like it was hand-crafted by a thoughtful, 
             val summary = if (older.isNotEmpty()) {
                 val u = older.filter { it.isUser }.joinToString("; ") { it.text.take(60) }
                 val a = older.filter { !it.isUser }.joinToString("; ") { it.text.take(60) }
-                "📋 Earlier: $u → 💬 $a"
+                "Earlier: $u → $a"
             } else ""
 
             val response = model.generateContent(content {
                 if (summary.isNotBlank()) text(summary)
-                shortHistory.forEach { msg ->
-                    if (msg.isUser) text("👤 ${msg.text}") else text("🤖 ${msg.text}")
-                }
-                image(processedBitmap)
+                shortHistory.forEach { if (it.isUser) text("User: ${it.text}") else text("Zarp: ${it.text}") }
+                image(processed)
                 text(prompt.ifBlank { "Describe this image in detail." })
             })
-
-            response.text ?: "⚠️ I couldn't analyze the image."
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Image processing failed", e)
-            handleApiError(e, modelName)
+            response.text ?: "⚠️ Could not analyze image."
         }
     }
 
     // ═══════════════════════════════════════════
-    // Translation
+    // Translate
     // ═══════════════════════════════════════════
 
-    suspend fun translate(text: String, targetLang: String): String = withContext(Dispatchers.IO) {
-        val key = KeyManager.getGeminiKey(context) ?: return@withContext "⚠️ API key not set."
-        val model = GenerativeModel(
-            modelName = "models/gemini-3.5-flash",
-            apiKey = key,
-            generationConfig = com.google.ai.client.generativeai.type.generationConfig {
-                temperature = 0.2f
-                maxOutputTokens = 2048
-            }
-        )
-        try {
-            val response = model.generateContent(content {
-                text("Translate this exactly to $targetLang. Return ONLY the translation.\n\n$text")
-            })
+    suspend fun translate(text: String, targetLang: String): String = withRetry("translate") {
+        withContext(Dispatchers.IO) {
+            val key = KeyManager.getGeminiKey(context) ?: return@withContext "⚠️ API key not set."
+            val model = GenerativeModel(modelName = "models/gemini-3.5-flash", apiKey = key,
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig { temperature = 0.2f; maxOutputTokens = 2048 })
+            val response = model.generateContent(content { text("Translate to $targetLang. Return ONLY translation.\n\n$text") })
             response.text ?: "Translation failed."
-        } catch (e: Exception) {
-            "⚠️ Translation unavailable."
         }
     }
 
     // ═══════════════════════════════════════════
-    // Embedding Storage
+    // Embedding
     // ═══════════════════════════════════════════
 
     suspend fun storeMessageEmbedding(text: String) {
-        if (text.isNotBlank()) {
-            embeddingManager.embedAndStore(text)
+        if (text.isNotBlank()) embeddingManager.embedAndStore(text)
+    }
+
+    // ═══════════════════════════════════════════
+    // Retry Logic
+    // ═══════════════════════════════════════════
+
+    private suspend fun <T> withRetry(operation: String, block: suspend () -> T): T {
+        var lastError: Exception? = null
+        repeat(MAX_RETRIES) { attempt ->
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "⚠️ $operation attempt ${attempt + 1} failed: ${e.localizedMessage}")
+                if (attempt < MAX_RETRIES - 1) kotlinx.coroutines.delay(RETRY_DELAY_MS)
+            }
         }
+        throw lastError ?: Exception("$operation failed after $MAX_RETRIES attempts")
     }
 
     // ═══════════════════════════════════════════
@@ -407,13 +244,10 @@ Your goal: Every response should feel like it was hand-crafted by a thoughtful, 
     private fun handleApiError(e: Exception, modelName: String): String {
         val msg = e.localizedMessage ?: ""
         return when {
-            msg.contains("403") -> "🔒 **Model unavailable**\n`$modelName` is not accessible on your plan.\n→ Switch to Gemini 2.5 Flash."
-            msg.contains("404") -> "🔍 **Model not found**\n`$modelName` doesn't exist."
-            msg.contains("429") -> "⏳ **Rate limit reached**\nPlease wait 30 seconds."
-            msg.contains("503") || msg.contains("timeout", true) -> "⏰ **Service busy**\nTry again in a moment."
-            msg.contains("MAX_TOKENS") -> "📏 **Response too long**\nTry a shorter question."
-            msg.contains("SAFETY") || msg.contains("blocked") -> "🛡️ **Content blocked** by safety filters."
-            else -> "❌ **Error:** ${e.localizedMessage ?: "Unknown"}"
+            msg.contains("403") -> "🔒 Model unavailable. Switch to Gemini 2.5 Flash."
+            msg.contains("429") -> "⏳ Rate limited. Wait 30 seconds."
+            msg.contains("503") || msg.contains("timeout", true) -> "⏰ Service busy. Try again."
+            else -> "❌ ${e.localizedMessage ?: "Unknown error"}"
         }
     }
 }

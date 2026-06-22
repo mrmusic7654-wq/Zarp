@@ -1,10 +1,11 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import android.net.Uri
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,16 +63,26 @@ fun InputBar(
     isVoiceMode: Boolean = false,
     onToggleVoiceMode: () -> Unit = {}
 ) {
-    // Animated pulse for mic when listening
-    val micPulse by rememberInfiniteTransition(label = "mic_pulse").animateFloat(
-        initialValue = 0.9f, targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "pulse"
+    val infiniteTransition = rememberInfiniteTransition(label = "input_anims")
+
+    val micPulse by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "mic_pulse"
     )
 
-    // Animated glow for send button
-    val sendGlow by rememberInfiniteTransition(label = "send_glow").animateFloat(
-        initialValue = 0.7f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "glow"
+    val sendGlow by infiniteTransition.animateFloat(
+        initialValue = 0.7f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "send_glow"
     )
 
     Column(
@@ -80,13 +91,12 @@ fun InputBar(
             .imePadding()
             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)
     ) {
-        // ── Attachment chips ──
         if (attachedImageUris.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(ZarpInputBg, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                    .border(width = 1.dp, color = ZarpInputBorder.copy(alpha = 0.3f), shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                    .border(1.dp, ZarpInputBorder.copy(alpha = 0.3f), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -117,7 +127,6 @@ fun InputBar(
             }
         }
 
-        // ── Input row ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -131,78 +140,33 @@ fun InputBar(
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ── Attach button ──
-            Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable { onAttachmentTap() },
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.size(36.dp).clip(CircleShape).clickable { onAttachmentTap() }, contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.AttachFile, "Attach", tint = ZarpTextTertiary, modifier = Modifier.size(22.dp))
             }
 
-            // ── Search toggle 🌐 ──
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onToggleSearchMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.TravelExplore, "Search",
-                    tint = if (isSearchMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable { onToggleSearchMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.TravelExplore, "Search", tint = if (isSearchMode) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
-            // ── Translate toggle 🌍 ──
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onToggleTranslateMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Rounded.Translate, "Translate",
-                    tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable { onToggleTranslateMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Translate, "Translate", tint = if (isTranslateMode) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
-            // ── Agent mode 🤖 ──
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onToggleAgentMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.SmartToy, "Agent",
-                    tint = if (isAgentMode) Color(0xFF00E676) else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable { onToggleAgentMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.SmartToy, "Agent", tint = if (isAgentMode) Color(0xFF00E676) else ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
-            // ── Automation mode 🎮 ──
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onToggleAutomationMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.SettingsSuggest, "Automation",
-                    tint = if (isAutomationMode) Color(0xFFCE93D8) else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable { onToggleAutomationMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.SettingsSuggest, "Automation", tint = if (isAutomationMode) Color(0xFFCE93D8) else ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
-            // ── Voice mode 🎤 ──
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onToggleVoiceMode() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.KeyboardVoice, "Voice",
-                    tint = if (isVoiceMode) ZarpAccent else ZarpTextTertiary,
-                    modifier = Modifier.size(20.dp)
-                )
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable { onToggleVoiceMode() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.KeyboardVoice, "Voice", tint = if (isVoiceMode) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(20.dp))
             }
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // ── Text field ──
-            Box(modifier = Modifier.weight(1f).padding(vertical = 12.dp)) {
+            Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
                 val placeholder = when {
                     isListening -> "🎤 Listening..."
                     isAutomationMode -> "🎮 Describe your automation..."
@@ -212,16 +176,12 @@ fun InputBar(
                     isTranslateMode -> "🌍 Type in any language..."
                     else -> "💬 Message Zarp..."
                 }
-                if (inputText.isEmpty()) {
-                    Text(placeholder, color = ZarpTextTertiary, fontSize = 14.sp, maxLines = 1)
-                }
+                if (inputText.isEmpty()) Text(placeholder, color = ZarpTextTertiary, fontSize = 14.sp, maxLines = 1)
                 if (!isListening) {
                     BasicTextField(
-                        value = inputText,
-                        onValueChange = onInputChanged,
+                        value = inputText, onValueChange = onInputChanged,
                         textStyle = TextStyle(color = ZarpTextPrimary, fontSize = 15.sp, lineHeight = 22.sp),
-                        cursorBrush = SolidColor(ZarpAccent),
-                        maxLines = 5,
+                        cursorBrush = SolidColor(ZarpAccent), maxLines = 5,
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
@@ -230,7 +190,6 @@ fun InputBar(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // ── Send / Pause / Resume / Mic button ──
             Crossfade(
                 targetState = when {
                     isThinking -> "pause"
@@ -243,20 +202,12 @@ fun InputBar(
             ) { state ->
                 when (state) {
                     "pause" -> {
-                        Box(
-                            modifier = Modifier.size(38.dp).clip(CircleShape)
-                                .background(Color(0xFFFFC107)),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(Color(0xFFFFC107)), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.Pause, "Pause", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                     }
                     "resume" -> {
-                        Box(
-                            modifier = Modifier.size(38.dp).clip(CircleShape)
-                                .background(ZarpAccent),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(ZarpAccent), contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.PlayArrow, "Resume", tint = ZarpMainBg, modifier = Modifier.size(22.dp))
                         }
                     }
@@ -267,40 +218,24 @@ fun InputBar(
                             else -> ZarpAccent
                         }
                         Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(sendColor.copy(alpha = sendGlow))
-                                .border(2.dp, sendColor, CircleShape),
+                            Modifier.size(38.dp).clip(CircleShape).background(sendColor.copy(alpha = sendGlow)).border(2.dp, sendColor, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.ArrowUpward, "Send",
-                                tint = ZarpMainBg, modifier = Modifier.size(20.dp)
-                            )
+                            Icon(Icons.Default.ArrowUpward, "Send", tint = ZarpMainBg, modifier = Modifier.size(20.dp))
                         }
                     }
                     else -> {
                         Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .scale(if (isListening) micPulse else 1f)
-                                .clickable { onMicTap() },
+                            Modifier.size(38.dp).clip(CircleShape).scale(if (isListening) micPulse else 1f).clickable { onMicTap() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.Mic, "Mic",
-                                tint = if (isListening) ZarpAccent else ZarpTextTertiary,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            Icon(Icons.Default.Mic, "Mic", tint = if (isListening) ZarpAccent else ZarpTextTertiary, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
             }
         }
 
-        // ── Mode indicator chips ──
         if (isAgentMode || isAutomationMode || isVoiceMode || isSearchMode || isTranslateMode) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 12.dp, end = 12.dp),

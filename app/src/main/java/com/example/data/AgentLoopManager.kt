@@ -6,6 +6,7 @@ import com.example.model.Message
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,7 +22,9 @@ class AgentLoopManager(
     companion object {
         private const val TAG = "AgentLoop"
         private const val PLANNING_MODEL = "models/gemini-2.5-flash"
-        private const val MAX_REVIEW_RETRIES = 3
+        private const val MAX_PLAN_RETRIES = 3
+        private const val MAX_FIX_RETRIES = 2
+        private const val MAX_OUTPUT_TOKENS = 8192
     }
 
     // ═══════════════════════════════════════════
@@ -34,7 +37,12 @@ class AgentLoopManager(
         val steps: List<AgentStep> = emptyList(),
         val currentStep: Int = 0,
         val status: AgentStatus = AgentStatus.IDLE,
-        val result: AgentResult? = null
+        val result: AgentResult? = null,
+        val createdAt: Long = System.currentTimeMillis(),
+        val repoName: String? = null,
+        val repoOwner: String? = null,
+        val buildStatus: BuildMonitor.BuildStatus? = null,
+        val buildLog: BuildMonitor.BuildLog? = null
     )
 
     data class AgentStep(
@@ -46,20 +54,35 @@ class AgentLoopManager(
         val output: String? = null,
         val generatedFiles: List<GitHubAgent.FileInfo> = emptyList(),
         val reviewScore: Int = 0,
-        val reviewIssues: List<String> = emptyList()
+        val reviewIssues: List<String> = emptyList(),
+        val retryCount: Int = 0
     )
 
-    enum class AgentStatus { IDLE, PLANNING, GENERATING, REVIEWING, FIXING, PUSHING, COMPLETED, FAILED }
-    enum class StepStatus { PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED }
-    enum class StepAction { GENERATE_CODE, REVIEW_CODE, PUSH_TO_GITHUB }
+    enum class AgentStatus {
+        IDLE, PLANNING, GENERATING, REVIEWING, FIXING, PUSHING,
+        WAITING_BUILD, BUILD_FAILED, FIXING_BUILD, REBUILDING, COMPLETED, FAILED, CANCELLED
+    }
+
+    enum class StepStatus {
+        PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, RETRYING
+    }
+
+    enum class StepAction {
+        GENERATE_CODE, REVIEW_CODE, FIX_CODE, PUSH_TO_GITHUB,
+        CREATE_PR, RUN_TESTS, ADD_WORKFLOW, FIX_BUILD
+    }
 
     data class AgentResult(
         val success: Boolean,
         val summary: String,
         val repoUrl: String? = null,
+        val prUrl: String? = null,
         val filesCreated: List<String> = emptyList(),
         val totalFiles: Int = 0,
-        val errors: List<String> = emptyList()
+        val errors: List<String> = emptyList(),
+        val executionTimeMs: Long = 0,
+        val buildStatus: String? = null,
+        val fixAttempts: Int = 0
     )
 
     data class AgentProgress(
@@ -81,349 +104,359 @@ class AgentLoopManager(
         chatHistory: List<Message> = emptyList(),
         onProgress: (AgentProgress) -> Unit = {}
     ): AgentTask = withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
         val task = AgentTask(userRequest = userRequest)
 
         try {
             // ══════════════════════════════════════
             // PHASE 1: PLAN
             // ══════════════════════════════════════
-            onProgress(AgentProgress(task.id, AgentStatus.PLANNING, 0, 0, "Planning...", "Analyzing requirements and creating task plan", 0.05f))
-            Log.d(TAG, "🧠 Phase 1: Planning")
+            onProgress(AgentProgress(task.id, AgentStatus.PLANNING, 0, 0, "Analyzing...", "Understanding requirements", 0.02f))
+            Log.d(TAG, "🧠 Phase 1: Planning | ${userRequest.take(80)}")
 
-            val planJson = createPlan(userRequest, chatHistory)
+            var planJson = ""
+            val planErrors = mutableListOf<String>()
+            for (attempt in 1..MAX_PLAN_RETRIES) {
+                onProgress(AgentProgress(task.id, AgentStatus.PLANNING, 0, 0, "Planning...", "Attempt $attempt/$MAX_PLAN_RETRIES", 0.05f * attempt))
+                planJson = createPlan(userRequest, chatHistory)
+                if (planJson.isNotBlank()) break
+                planErrors.add("Attempt $attempt empty")
+            }
+
             if (planJson.isBlank()) {
-                Log.e(TAG, "❌ Empty plan returned")
-                return@withContext task.copy(
-                    status = AgentStatus.FAILED,
-                    result = AgentResult(false, "Failed to create a plan. Try rephrasing your request.", errors = listOf("Empty plan"))
-                )
+                return@withContext task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Planning failed after $MAX_PLAN_RETRIES attempts", errors = planErrors, executionTimeMs = System.currentTimeMillis() - startTime))
             }
 
             val steps = parsePlanSteps(planJson)
             if (steps.isEmpty()) {
-                Log.e(TAG, "❌ No steps parsed from plan")
-                return@withContext task.copy(
-                    status = AgentStatus.FAILED,
-                    result = AgentResult(false, "Could not parse the plan into steps.", errors = listOf("Parse failed"))
-                )
+                return@withContext task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Could not parse plan", errors = listOf("Raw: ${planJson.take(200)}"), executionTimeMs = System.currentTimeMillis() - startTime))
             }
 
-            Log.d(TAG, "📋 Plan created: ${steps.size} steps")
-            steps.forEachIndexed { i, s -> Log.d(TAG, "  ${i + 1}. [${s.action}] ${s.description}") }
+            // Add workflow step automatically
+            val stepsWithWorkflow = steps.toMutableList()
+            stepsWithWorkflow.add(stepsWithWorkflow.size - 1, AgentStep(description = "Add GitHub Actions build workflow", action = StepAction.ADD_WORKFLOW, language = "yaml"))
 
-            val plannedTask = task.copy(steps = steps, status = AgentStatus.GENERATING)
-            val totalSteps = steps.size
-            val allGeneratedFiles = mutableListOf<GitHubAgent.FileInfo>()
+            Log.d(TAG, "✅ Plan: ${stepsWithWorkflow.size} steps")
+            onProgress(AgentProgress(task.id, AgentStatus.GENERATING, 0, stepsWithWorkflow.size, "Plan ready!", "${stepsWithWorkflow.size} steps", 0.1f))
 
-            // ══════════════════════════════════════
-            // PHASE 2-4: EXECUTE STEPS
-            // ══════════════════════════════════════
+            val totalSteps = stepsWithWorkflow.size
+            val allFiles = mutableListOf<GitHubAgent.FileInfo>()
             val completedSteps = mutableListOf<AgentStep>()
+            var repoUrl: String? = null
+            var repoOwner: String? = null
+            var repoName: String? = null
 
-            for ((index, step) in steps.withIndex()) {
+            // ══════════════════════════════════════
+            // PHASE 2-4: Execute Steps
+            // ══════════════════════════════════════
+            for ((index, step) in stepsWithWorkflow.withIndex()) {
                 val stepNum = index + 1
-                val baseProgress = 0.1f + (0.7f * index / totalSteps)
-                val stepProgress = 0.7f / totalSteps
+                val progress = 0.1f + (0.6f * index / totalSteps)
 
-                Log.d(TAG, "━━━ Step $stepNum/$totalSteps: ${step.action} ━━━")
-
-                val executedStep = when (step.action) {
+                val executed = when (step.action) {
                     StepAction.GENERATE_CODE -> {
-                        onProgress(AgentProgress(task.id, AgentStatus.GENERATING, stepNum, totalSteps, step.description, "Generating code...", baseProgress))
+                        onProgress(AgentProgress(task.id, AgentStatus.GENERATING, stepNum, totalSteps, step.description, "Writing code...", progress))
                         executeGenerateCode(step, userRequest, chatHistory)
                     }
+                    StepAction.ADD_WORKFLOW -> {
+                        onProgress(AgentProgress(task.id, AgentStatus.GENERATING, stepNum, totalSteps, step.description, "Adding CI/CD...", progress))
+                        executeAddWorkflow()
+                    }
                     StepAction.REVIEW_CODE -> {
-                        onProgress(AgentProgress(task.id, AgentStatus.REVIEWING, stepNum, totalSteps, step.description, "Reviewing code quality...", baseProgress + stepProgress * 0.5f))
+                        onProgress(AgentProgress(task.id, AgentStatus.REVIEWING, stepNum, totalSteps, step.description, "Reviewing...", progress + 0.03f))
                         executeReviewCode(step)
                     }
                     StepAction.PUSH_TO_GITHUB -> {
-                        onProgress(AgentProgress(task.id, AgentStatus.PUSHING, stepNum, totalSteps, step.description, "Pushing to GitHub...", baseProgress + stepProgress * 0.5f))
-                        executePushToGitHub(step, allGeneratedFiles)
+                        onProgress(AgentProgress(task.id, AgentStatus.PUSHING, stepNum, totalSteps, step.description, "Pushing...", progress + 0.03f))
+                        executePushToGitHub(step, allFiles).also { result ->
+                            if (result.status == StepStatus.COMPLETED && result.output != null) {
+                                repoUrl = result.output
+                                repoOwner = gitHubAgent.getAuthenticatedUsername()
+                                repoName = repoUrl?.let { extractRepoName(it) }
+                            }
+                        }
+                    }
+                    StepAction.FIX_BUILD -> {
+                        onProgress(AgentProgress(task.id, AgentStatus.FIXING_BUILD, stepNum, totalSteps, step.description, "Fixing build...", progress + 0.03f))
+                        executeFixBuild(step, userRequest, completedSteps)
+                    }
+                    else -> step.copy(status = StepStatus.SKIPPED)
+                }
+
+                completedSteps.add(executed)
+                if (executed.generatedFiles.isNotEmpty()) allFiles.addAll(executed.generatedFiles)
+            }
+
+            // ══════════════════════════════════════
+            // PHASE 5: BUILD & VERIFY
+            // ══════════════════════════════════════
+            var buildStatus: BuildMonitor.BuildStatus? = null
+            var buildLog: BuildMonitor.BuildLog? = null
+            var fixAttempts = 0
+
+            if (repoOwner != null && repoName != null) {
+                val token = KeyManager.getGithubKey(context) ?: ""
+                if (token.isNotBlank()) {
+                    val buildMonitor = BuildMonitor(token)
+
+                    onProgress(AgentProgress(task.id, AgentStatus.WAITING_BUILD, totalSteps, totalSteps, "Building...", "Waiting for GitHub Actions", 0.85f))
+
+                    buildStatus = buildMonitor.waitForBuildCompletion(repoOwner, repoName, maxWaitSeconds = 120)
+
+                    if (buildStatus != null && buildStatus.isFailure) {
+                        onProgress(AgentProgress(task.id, AgentStatus.BUILD_FAILED, totalSteps, totalSteps, "Build failed!", "Fetching error logs...", 0.9f))
+                        buildLog = buildMonitor.getBuildLogs(repoOwner, repoName, buildStatus.id)
+
+                        // Auto-fix loop
+                        while (fixAttempts < MAX_FIX_RETRIES && buildStatus?.isFailure == true) {
+                            fixAttempts++
+                            Log.d(TAG, "🔧 Fix attempt $fixAttempts/$MAX_FIX_RETRIES")
+                            onProgress(AgentProgress(task.id, AgentStatus.FIXING_BUILD, totalSteps, totalSteps, "Fixing...", "Auto-fix attempt $fixAttempts", 0.92f))
+
+                            val fixStep = executeFixBuild(
+                                AgentStep(description = "Fix build errors", action = StepAction.FIX_BUILD),
+                                "Build failed with errors. Fix the code so it compiles.",
+                                completedSteps
+                            )
+
+                            if (fixStep.status == StepStatus.COMPLETED && fixStep.generatedFiles.isNotEmpty()) {
+                                val pushResult = executePushToGitHub(
+                                    AgentStep(description = "Push fixes", action = StepAction.PUSH_TO_GITHUB),
+                                    fixStep.generatedFiles
+                                )
+
+                                if (pushResult.status == StepStatus.COMPLETED) {
+                                    delay(5000)
+                                    buildStatus = buildMonitor.waitForBuildCompletion(repoOwner, repoName, maxWaitSeconds = 60)
+                                    buildLog = if (buildStatus?.isFailure == true) buildMonitor.getBuildLogs(repoOwner, repoName, buildStatus.id) else null
+                                }
+                            } else {
+                                break
+                            }
+                        }
                     }
                 }
-
-                completedSteps.add(executedStep)
-                if (executedStep.generatedFiles.isNotEmpty()) {
-                    allGeneratedFiles.addAll(executedStep.generatedFiles)
-                }
-                Log.d(TAG, "  Result: ${executedStep.status}")
             }
 
             // ══════════════════════════════════════
-            // PHASE 5: BUILD RESULT
+            // PHASE 6: FINAL RESULT
             // ══════════════════════════════════════
-            val allSucceeded = completedSteps.all { it.status == StepStatus.COMPLETED }
-            val repoUrl = completedSteps.lastOrNull { it.action == StepAction.PUSH_TO_GITHUB }?.output
-            val summary = buildResultSummary(completedSteps, allSucceeded, repoUrl)
+            val success = buildStatus?.isSuccess ?: completedSteps.all { it.status == StepStatus.COMPLETED }
+            val summary = buildFinalSummary(completedSteps, success, repoUrl, buildStatus, fixAttempts)
+            val executionTime = System.currentTimeMillis() - startTime
 
-            onProgress(AgentProgress(task.id, AgentStatus.COMPLETED, totalSteps, totalSteps, "Done!", summary, 1f))
+            onProgress(AgentProgress(task.id, if (success) AgentStatus.COMPLETED else AgentStatus.COMPLETED, totalSteps, totalSteps, if (success) "✅ Success!" else "⚠️ Done", summary, 1f))
 
-            plannedTask.copy(
-                steps = completedSteps,
-                status = if (allSucceeded) AgentStatus.COMPLETED else AgentStatus.COMPLETED,
-                result = AgentResult(
-                    success = allSucceeded,
-                    summary = summary,
-                    repoUrl = repoUrl?.let { extractUrl(it) },
-                    filesCreated = allGeneratedFiles.map { it.path },
-                    totalFiles = allGeneratedFiles.size,
-                    errors = completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown error" }
-                )
+            task.copy(
+                steps = completedSteps, status = if (success) AgentStatus.COMPLETED else AgentStatus.COMPLETED,
+                repoOwner = repoOwner, repoName = repoName, buildStatus = buildStatus, buildLog = buildLog,
+                result = AgentResult(success, summary, repoUrl?.let { extractUrl(it) }, allFiles.map { it.path }, allFiles.size,
+                    completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" },
+                    executionTime, buildStatus?.conclusion, fixAttempts)
             )
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Agent loop crashed", e)
-            task.copy(
-                status = AgentStatus.FAILED,
-                result = AgentResult(false, "Agent crashed: ${e.localizedMessage}", errors = listOf(e.localizedMessage ?: "Unknown"))
-            )
+            Log.e(TAG, "❌ Agent crashed", e)
+            task.copy(status = AgentStatus.FAILED, result = AgentResult(false, "Crashed: ${e.localizedMessage}", errors = listOf(e.localizedMessage ?: "Crash"), executionTimeMs = System.currentTimeMillis() - startTime))
         }
     }
 
     // ═══════════════════════════════════════════
-    // PHASE 1: Create Plan
+    // Continue Failed Task (with build fix context)
     // ═══════════════════════════════════════════
 
-    private suspend fun createPlan(
-        userRequest: String,
-        chatHistory: List<Message>
-    ): String = withContext(Dispatchers.IO) {
+    suspend fun continueFailedTask(
+        task: AgentTask,
+        additionalContext: String = "",
+        onProgress: (AgentProgress) -> Unit = {}
+    ): AgentTask {
+        val contextPrompt = buildString {
+            appendLine("Previous task: ${task.userRequest}")
+            appendLine("The build failed. Fix the code based on the errors below.")
+            if (task.buildLog != null) {
+                appendLine("Build errors:")
+                task.buildLog.errors.forEach { appendLine("  - $it") }
+            }
+            if (additionalContext.isNotBlank()) {
+                appendLine("Additional instructions: $additionalContext")
+            }
+        }
+        return executeAgentTask(contextPrompt, emptyList(), onProgress)
+    }
+
+    // ═══════════════════════════════════════════
+    // PHASE 1: Plan
+    // ═══════════════════════════════════════════
+
+    private suspend fun createPlan(userRequest: String, chatHistory: List<Message>): String = withContext(Dispatchers.IO) {
         try {
-            val key = KeyManager.getGeminiKey(context) ?: return@withContext ""
+            val key = KeyManager.getGeminiKey(context)
+            if (key.isNullOrBlank()) { Log.e(TAG, "❌ No API key"); return@withContext "" }
+
             val contextBlock = if (chatHistory.isNotEmpty()) {
-                "\n\nPrevious conversation context (use this to understand what the user wants):\n" +
-                chatHistory.takeLast(6).joinToString("\n") { "${if (it.isUser) "User" else "Assistant"}: ${it.text.take(300)}" }
+                "\nContext:\n" + chatHistory.takeLast(4).joinToString("\n") { "${if (it.isUser) "User" else "AI"}: ${it.text.take(200)}" }
             } else ""
 
-            val model = GenerativeModel(
-                modelName = PLANNING_MODEL,
-                apiKey = key,
-                generationConfig = com.google.ai.client.generativeai.type.generationConfig {
-                    temperature = 0.3f
-                    maxOutputTokens = 2048
-                }
-            )
+            val model = GenerativeModel(modelName = PLANNING_MODEL, apiKey = key,
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig { temperature = 0.2f; maxOutputTokens = MAX_OUTPUT_TOKENS })
 
             val prompt = """
-You are an expert software architect. Break down this coding request into a detailed plan of files to create.
-
-User request: "$userRequest"
+Plan files for: $userRequest
 $contextBlock
 
-Return ONLY a JSON array. Each step must have:
-- "description": Detailed description of what this file does
-- "action": One of: GENERATE_CODE, REVIEW_CODE, PUSH_TO_GITHUB
-- "language": Programming language (kotlin, python, java, javascript, xml, etc.)
+Return JSON array. Each item: {"description":"...","action":"GENERATE_CODE|REVIEW_CODE|PUSH_TO_GITHUB","language":"kotlin|python|xml|json|gradle|yaml"}
 
-IMPORTANT RULES:
-- Include ALL files needed: data models, ViewModels, screens, API services, repositories, build files, manifest changes
-- Think about: architecture (MVVM), dependencies, imports, error handling, edge cases
-- Put GENERATE_CODE for every file
-- Put ONE REVIEW_CODE step after all generation
-- Put ONE PUSH_TO_GITHUB step at the very end
-- Name files with their full paths (e.g., "app/src/main/java/com/example/WeatherViewModel.kt")
+Rules: Include ALL files (data, UI, API, config, build). One REVIEW_CODE. One PUSH_TO_GITHUB at end.
 
-Example for "Create a weather app":
-[
-  {"description": "WeatherData data class with city, temp, humidity fields", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "WeatherApi Retrofit interface with GET endpoint", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "WeatherRepository that fetches from API with error handling", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "WeatherViewModel with loading/success/error states", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "WeatherScreen composable with search and results", "action": "GENERATE_CODE", "language": "kotlin"},
-  {"description": "Review all generated files for correctness and consistency", "action": "REVIEW_CODE", "language": "kotlin"},
-  {"description": "Push complete project to GitHub", "action": "PUSH_TO_GITHUB", "language": ""}
-]
-
-Return ONLY the JSON array. No other text, no markdown, no explanations.
+Example: [{"description":"Data class","action":"GENERATE_CODE","language":"kotlin"},{"description":"Review","action":"REVIEW_CODE","language":"kotlin"},{"description":"Push","action":"PUSH_TO_GITHUB","language":""}]
             """.trimIndent()
 
+            Log.d(TAG, "  📤 Planning...")
             val response = model.generateContent(content { text(prompt) })
-            response.text ?: ""
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Plan creation failed", e)
-            ""
-        }
+            response.text?.trim() ?: ""
+        } catch (e: Exception) { Log.e(TAG, "  ❌ Plan error", e); "" }
     }
 
-    private fun parsePlanSteps(planJson: String): List<AgentStep> {
+    private fun parsePlanSteps(json: String): List<AgentStep> {
         return try {
-            val cleaned = planJson.trim()
-                .removePrefix("```json")
-                .removePrefix("```")
-                .removeSuffix("```")
-                .trim()
-
-            val arr = JSONArray(cleaned)
-            (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                AgentStep(
-                    description = obj.optString("description", "Step ${i + 1}"),
+            val cleaned = json.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            (0 until JSONArray(cleaned).length()).map { i ->
+                val obj = JSONArray(cleaned).getJSONObject(i)
+                AgentStep(description = obj.optString("description", "Step ${i + 1}"),
                     action = try { StepAction.valueOf(obj.optString("action", "GENERATE_CODE")) } catch (e: Exception) { StepAction.GENERATE_CODE },
-                    language = obj.optString("language", "kotlin")
-                )
+                    language = obj.optString("language", "kotlin"))
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Parse plan failed: ${e.localizedMessage}")
-            emptyList()
-        }
+        } catch (e: Exception) { Log.e(TAG, "  ❌ Parse error", e); emptyList() }
     }
 
     // ═══════════════════════════════════════════
-    // PHASE 2: Generate Code
+    // Generate Code
     // ═══════════════════════════════════════════
 
-    private suspend fun executeGenerateCode(
-        step: AgentStep,
-        userRequest: String,
-        chatHistory: List<Message>
-    ): AgentStep {
+    private suspend fun executeGenerateCode(step: AgentStep, userRequest: String, chatHistory: List<Message>): AgentStep {
         return try {
-            val language = step.language.ifBlank { "kotlin" }
+            val lang = step.language.ifBlank { "kotlin" }
             val response = geminiRepository.generateResponse(
-                prompt = """
-Generate complete, production-ready $language code for: ${step.description}
-
-Full project context: $userRequest
-
-Requirements:
-- Include ALL necessary imports
-- Use proper error handling (try-catch, sealed classes, Result type)
-- Follow clean architecture / MVVM / best practices
-- Add meaningful comments for complex logic
-- Use latest stable libraries and APIs
-- Make the code complete and self-contained
-
-Return ONLY the code. No explanations.
-                """.trimIndent(),
-                modelName = PLANNING_MODEL,
-                chatHistory = chatHistory
-            )
-
-            val fileName = extractFileName(step.description) ?: "generated_${UUID.randomUUID().toString().take(8)}.kt"
-            val code = extractCodeBlock(response, language) ?: response
-            val file = GitHubAgent.FileInfo(path = fileName, content = code)
-
-            Log.d(TAG, "  ✅ Generated: $fileName (${code.length} chars)")
-            step.copy(status = StepStatus.COMPLETED, output = code, generatedFiles = listOf(file))
-        } catch (e: Exception) {
-            Log.e(TAG, "  ❌ Generation failed: ${e.localizedMessage}")
-            step.copy(status = StepStatus.FAILED, output = "Generation failed: ${e.localizedMessage}")
-        }
+                prompt = "Write complete $lang code for: ${step.description}. Context: $userRequest. Return ONLY code.",
+                modelName = PLANNING_MODEL, chatHistory = chatHistory)
+            val name = extractFileName(step.description) ?: "file_${UUID.randomUUID().toString().take(6)}.$lang"
+            val code = extractCodeBlock(response, lang) ?: response
+            step.copy(status = StepStatus.COMPLETED, output = code, generatedFiles = listOf(GitHubAgent.FileInfo(path = name, content = code)))
+        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "Failed: ${e.localizedMessage}") }
     }
 
     // ═══════════════════════════════════════════
-    // PHASE 3: Review Code
+    // Add GitHub Actions Workflow
+    // ═══════════════════════════════════════════
+
+    private fun executeAddWorkflow(): AgentStep {
+        val workflowYaml = """
+name: Build
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Grant execute permission
+        run: chmod +x gradlew
+      - name: Build
+        run: ./gradlew assembleDebug
+        """.trimIndent()
+
+        return AgentStep(
+            description = "GitHub Actions build workflow",
+            action = StepAction.ADD_WORKFLOW,
+            status = StepStatus.COMPLETED,
+            output = workflowYaml,
+            generatedFiles = listOf(GitHubAgent.FileInfo(path = ".github/workflows/build.yml", content = workflowYaml))
+        )
+    }
+
+    // ═══════════════════════════════════════════
+    // Review
     // ═══════════════════════════════════════════
 
     private suspend fun executeReviewCode(step: AgentStep): AgentStep {
+        return step.copy(status = StepStatus.COMPLETED, output = "Review passed", reviewScore = 8)
+    }
+
+    // ═══════════════════════════════════════════
+    // Fix Build Errors
+    // ═══════════════════════════════════════════
+
+    private suspend fun executeFixBuild(
+        step: AgentStep,
+        userRequest: String,
+        completedSteps: List<AgentStep>
+    ): AgentStep {
         return try {
-            Log.d(TAG, "  🔍 Reviewing generated files...")
-            step.copy(status = StepStatus.COMPLETED, output = "Code review passed", reviewScore = 8)
+            val allCode = completedSteps
+                .filter { it.action == StepAction.GENERATE_CODE && it.status == StepStatus.COMPLETED }
+                .joinToString("\n\n") { step ->
+                    step.generatedFiles.joinToString("\n") { "// File: ${it.path}\n${it.content}" }
+                }
+
+            val response = geminiRepository.generateResponse(
+                prompt = "Fix build errors in this code. Request: $userRequest\n\nCode:\n$allCode\n\nReturn the fixed files. Use ```language ... ``` for each file.",
+                modelName = PLANNING_MODEL)
+            
+            step.copy(status = StepStatus.COMPLETED, output = response)
         } catch (e: Exception) {
-            Log.e(TAG, "  ❌ Review failed: ${e.localizedMessage}")
-            step.copy(status = StepStatus.FAILED, output = "Review failed: ${e.localizedMessage}")
+            step.copy(status = StepStatus.FAILED, output = "Fix failed: ${e.localizedMessage}")
         }
     }
 
     // ═══════════════════════════════════════════
-    // PHASE 4: Push to GitHub
+    // Push to GitHub
     // ═══════════════════════════════════════════
 
-    private suspend fun executePushToGitHub(
-        step: AgentStep,
-        allFiles: List<GitHubAgent.FileInfo>
-    ): AgentStep {
-        if (allFiles.isEmpty()) {
-            Log.w(TAG, "  ⚠️ No files to push")
-            return step.copy(status = StepStatus.SKIPPED, output = "No files generated to push")
-        }
-
+    private suspend fun executePushToGitHub(step: AgentStep, allFiles: List<GitHubAgent.FileInfo>): AgentStep {
+        if (allFiles.isEmpty()) return step.copy(status = StepStatus.SKIPPED, output = "No files")
         return try {
-            Log.d(TAG, "  📤 Pushing ${allFiles.size} files to GitHub...")
-
-            val owner = gitHubAgent.getAuthenticatedUsername()
-            if (owner.isNullOrBlank()) {
-                Log.e(TAG, "  ❌ Could not get GitHub username")
-                return step.copy(status = StepStatus.FAILED, output = "Could not authenticate with GitHub. Check your token.")
-            }
-
+            val owner = gitHubAgent.getAuthenticatedUsername() ?: return step.copy(status = StepStatus.FAILED, output = "Auth failed")
             val repoName = "zarp-${System.currentTimeMillis().toString().takeLast(8)}"
-            Log.d(TAG, "  Creating repo: $owner/$repoName")
-
-            val result = gitHubAgent.createProjectFromFiles(
-                repoName = repoName,
-                files = allFiles,
-                description = "Generated by Zarp AI Agent",
-                isPrivate = false
-            )
-
-            if (result.success && result.repo != null) {
-                val url = result.repo.htmlUrl
-                Log.d(TAG, "  ✅ Pushed to: $url")
-                step.copy(status = StepStatus.COMPLETED, output = url)
-            } else {
-                Log.e(TAG, "  ❌ Push failed: ${result.error}")
-                step.copy(status = StepStatus.FAILED, output = "Push failed: ${result.error ?: "Unknown error"}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "  ❌ Push error: ${e.localizedMessage}")
-            step.copy(status = StepStatus.FAILED, output = "Push error: ${e.localizedMessage}")
-        }
+            val result = gitHubAgent.createProjectFromFiles(repoName, allFiles, "Created by Zarp AI")
+            if (result.success && result.repo != null) step.copy(status = StepStatus.COMPLETED, output = result.repo.htmlUrl)
+            else step.copy(status = StepStatus.FAILED, output = "Push failed: ${result.error}")
+        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "Error: ${e.localizedMessage}") }
     }
 
     // ═══════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════
 
-    private fun extractFileName(description: String): String? {
-        val patterns = listOf(
-            Regex("""([\w/]+\.(kt|java|py|js|ts|xml|json|gradle|kts|pro))"""),
-            Regex("""(\w+\.(kt|java|py|js|ts|xml|json))""")
-        )
-        for (pattern in patterns) {
-            pattern.find(description)?.let { return it.value }
-        }
+    private fun extractFileName(desc: String): String? {
+        Regex("""([\w/]+\.(kt|java|py|js|ts|xml|json|gradle|kts|pro|md|yml|yaml))""").find(desc)?.let { return it.value }
         return null
     }
 
-    private fun extractCodeBlock(response: String, language: String): String? {
-        val regex = Regex("```${language}\\s*\\n(.*?)```", RegexOption.DOT_MATCHES_ALL)
-        return regex.find(response)?.groupValues?.get(1)?.trim()
+    private fun extractCodeBlock(text: String, lang: String): String? {
+        return Regex("```$lang\\s*\\n(.*?)```", RegexOption.DOT_MATCHES_ALL).find(text)?.groupValues?.get(1)?.trim()
     }
 
-    private fun extractUrl(text: String): String? {
-        val regex = Regex("(https?://[^\\s)]+)")
-        return regex.find(text)?.value
+    private fun extractUrl(text: String): String? = Regex("(https?://[^\\s)]+)").find(text)?.value
+
+    private fun extractRepoName(url: String): String? {
+        return Regex("github\\.com/[^/]+/([^/]+)").find(url)?.groupValues?.get(1)
     }
 
-    private fun buildResultSummary(
-        steps: List<AgentStep>,
-        success: Boolean,
-        repoUrl: String?
-    ): String {
-        val completed = steps.count { it.status == StepStatus.COMPLETED }
-        val failed = steps.count { it.status == StepStatus.FAILED }
-        val skipped = steps.count { it.status == StepStatus.SKIPPED }
-        val generated = steps.filter { it.action == StepAction.GENERATE_CODE && it.status == StepStatus.COMPLETED }
-
-        return buildString {
-            appendLine(if (success) "✅ Task completed successfully!" else "⚠️ Task completed with issues.")
-            appendLine()
-            appendLine("📊 Summary:")
-            appendLine("   📝 Files generated: ${generated.size}")
-            appendLine("   ✅ Completed: $completed")
-            if (failed > 0) appendLine("   ❌ Failed: $failed")
-            if (skipped > 0) appendLine("   ⏭️ Skipped: $skipped")
-            appendLine()
-            if (repoUrl != null) {
-                appendLine("🔗 Repository: $repoUrl")
-                appendLine()
-            }
-            appendLine("📁 Generated files:")
-            generated.forEach { step ->
-                step.generatedFiles.forEach { file ->
-                    appendLine("   📄 ${file.path}")
-                }
-            }
+    private fun buildFinalSummary(
+        steps: List<AgentStep>, success: Boolean, repoUrl: String?,
+        buildStatus: BuildMonitor.BuildStatus?, fixAttempts: Int
+    ): String = buildString {
+        appendLine(if (success) "✅ Task completed!" else "⚠️ Task completed with issues.")
+        appendLine()
+        appendLine("📊 Summary:")
+        appendLine("   📝 Files: ${steps.count { it.status == StepStatus.COMPLETED && it.action == StepAction.GENERATE_CODE }}")
+        appendLine("   🔧 Fix attempts: $fixAttempts")
+        if (buildStatus != null) appendLine("   🏗️ Build: ${buildStatus.conclusion ?: "unknown"}")
+        if (repoUrl != null) { appendLine(); appendLine("🔗 $repoUrl") }
+        steps.filter { it.generatedFiles.isNotEmpty() }.forEach { s ->
+            s.generatedFiles.forEach { appendLine("   📄 ${it.path}") }
         }
     }
 }

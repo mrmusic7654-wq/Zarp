@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,8 +17,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.util.concurrent.Executors
 
 class DeviceController(private val context: Context) {
@@ -197,19 +196,21 @@ class DeviceController(private val context: Context) {
     private fun executeScreenshot(): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         return try {
-            service.takeScreenshot(
-                mainHandler,
-                Executors.newSingleThreadExecutor(),
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        Log.d(TAG, "📸 Screenshot captured")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                service.takeScreenshot(
+                    mainHandler,
+                    Executors.newSingleThreadExecutor(),
+                    object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                            Log.d(TAG, "📸 Screenshot captured")
+                        }
+                        override fun onFailure(errorCode: Int) {
+                            Log.w(TAG, "Screenshot failed: $errorCode")
+                        }
                     }
-                    override fun onFailure(errorCode: Int) {
-                        Log.w(TAG, "Screenshot failed: $errorCode")
-                    }
-                }
-            )
-            ActionResult(true, "Screenshot captured")
+                )
+            }
+            ActionResult(true, "Screenshot requested")
         } catch (e: Exception) {
             ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
         }
@@ -309,7 +310,6 @@ class ZarpAccessibilityService : AccessibilityService() {
         var instance: ZarpAccessibilityService? = null
             private set
     }
-
     override fun onServiceConnected() { super.onServiceConnected(); instance = this }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}

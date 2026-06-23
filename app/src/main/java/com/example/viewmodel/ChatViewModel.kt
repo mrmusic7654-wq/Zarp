@@ -77,13 +77,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val errorMessage: String? = null,
         val retryCount: Int = 0,
         val snackbarMessage: String? = null,
-        val showQuickActions: Boolean = false,
-        val connectionStatus: ConnectionStatus = ConnectionStatus.ONLINE,
         val dailyUsage: DailyUsage = DailyUsage()
     )
 
     data class DailyUsage(val requestsToday: Int = 0, val tokensUsed: Long = 0, val limitReached: Boolean = false)
-    enum class ConnectionStatus { ONLINE, OFFLINE, RATE_LIMITED }
 
     companion object {
         val availableModels = listOf(
@@ -149,7 +146,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun onToggleAgentMode() { _uiState.value = _uiState.value.copy(isAgentMode = !_uiState.value.isAgentMode, isAutomationMode = false) }
     fun onToggleAutomationMode() { _uiState.value = _uiState.value.copy(isAutomationMode = !_uiState.value.isAutomationMode, isAgentMode = false) }
     fun onToggleVoiceMode() { val newMode = !_uiState.value.isVoiceMode; _uiState.value = _uiState.value.copy(isVoiceMode = newMode); if (newMode) voiceUIManager.show() else { voiceUIManager.hide(); streamingVoiceManager.stopListening() } }
-    fun onToggleQuickActions() { _uiState.value = _uiState.value.copy(showQuickActions = !_uiState.value.showQuickActions) }
     fun onDismissSnackbar() { _uiState.value = _uiState.value.copy(snackbarMessage = null) }
 
     fun onSend() { if (_uiState.value.inputText.isBlank() && _uiState.value.selectedImageUris.isEmpty()) return; when { _uiState.value.isAutomationMode -> onSendAutomation(); _uiState.value.isAgentMode -> onSendAgent(); else -> onSendChat() } }
@@ -171,11 +167,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         currentGenerationJob = viewModelScope.launch {
             try {
                 if (_uiState.value.isTranslateMode && currentText.isNotBlank()) currentText = geminiRepository.translate(currentText, "English")
-                val safeConvId = if (conversationId == null && !isRegenerate) { val nc = chatRepository.createNewConversation(displayText); conversationId = nc.id; _uiState.value = _uiState.value.copy(currentConversationId = conversationId); conversationId } else { if (!isRegenerate && conversationId != null) chatRepository.addMessageToConversation(conversationId, displayText, true); conversationId ?: "" }
+                val safeConvId: String = if (conversationId == null && !isRegenerate) {
+                    val nc = chatRepository.createNewConversation(displayText); conversationId = nc.id; _uiState.value = _uiState.value.copy(currentConversationId = conversationId); conversationId
+                } else {
+                    if (!isRegenerate && conversationId != null) chatRepository.addMessageToConversation(conversationId, displayText, true); conversationId ?: ""
+                }
                 val modelName = getModelApiName(_uiState.value.selectedModel)
                 val firstUri = imageUris.firstOrNull()
                 val isImage = firstUri?.let { getApplication<Application>().contentResolver.getType(it)?.startsWith("image/") == true } ?: false
-                var responseText = if (isImage && firstUri != null) geminiRepository.generateResponseWithImage(currentText, firstUri, modelName, currentMessages.dropLast(1), _uiState.value.customStyle)
+                var responseText: String = if (isImage && firstUri != null) geminiRepository.generateResponseWithImage(currentText, firstUri, modelName, currentMessages.dropLast(1), _uiState.value.customStyle)
                 else { val fc = if (firstUri != null && !isImage) readFileContent(firstUri) else ""; val fp = if (fc.isNotBlank()) "$currentText\n\n[File]:\n$fc" else currentText; geminiRepository.generateResponse(fp, modelName, currentMessages.dropLast(1), _uiState.value.customStyle, _uiState.value.isSearchMode) }
                 if (_uiState.value.isTranslateMode) responseText = geminiRepository.translate(responseText, _uiState.value.translateLanguage)
                 totalRequestsToday++; UsageTracker.recordRequest(getApplication(), _uiState.value.selectedModel)

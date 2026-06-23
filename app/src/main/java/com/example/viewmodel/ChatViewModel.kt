@@ -169,21 +169,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _uiState.value = _uiState.value.copy(inputText = "", isAiThinking = true, isPaused = false, selectedImageUris = emptyList(), selectedFileNames = emptyList(), selectedFileTypes = emptyList(), errorMessage = null, snackbarMessage = null)
 
-        // Pre-create conversation using runBlocking (runs on current thread, safe for Room)
         val safeConvId: String
         if (conversationId == null && !isRegenerate) {
             val nc = runBlocking { chatRepository.createNewConversation(displayText) }
-            conversationId = nc.id
-            _uiState.value = _uiState.value.copy(currentConversationId = conversationId)
-            safeConvId = conversationId
+            conversationId = nc.id; _uiState.value = _uiState.value.copy(currentConversationId = conversationId); safeConvId = conversationId
         } else {
             safeConvId = conversationId ?: ""
-            if (!isRegenerate && conversationId != null) {
-                runBlocking { chatRepository.addMessageToConversation(safeConvId, displayText, true) }
-            }
+            if (!isRegenerate && conversationId != null) runBlocking { chatRepository.addMessageToConversation(safeConvId, displayText, true) }
         }
-        val finalConvId = safeConvId
-        val finalText = currentText
+        val finalConvId = safeConvId; val finalText = currentText
 
         currentGenerationJob = viewModelScope.launch {
             try {
@@ -216,8 +210,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val conversationId = _uiState.value.currentConversationId
         val userMessage = Message(UUID.randomUUID().toString(), "🤖 Agent: $currentText", true, System.currentTimeMillis())
         _uiState.value = _uiState.value.copy(messages = _uiState.value.messages + userMessage, inputText = "", isAiThinking = true, isPaused = false, agentProgress = null, agentTaskResult = null, buildStatus = null, buildLog = null, showBuildNotification = false, errorMessage = null, snackbarMessage = null)
-        val capturedConvId = conversationId
-        val capturedText = currentText
+        val capturedConvId = conversationId; val capturedText = currentText
 
         currentGenerationJob = viewModelScope.launch {
             try {

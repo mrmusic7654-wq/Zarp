@@ -192,30 +192,16 @@ class DeviceController(private val context: Context) {
         val result = service.performGlobalAction(action)
         return if (result) ActionResult(true, label) else ActionResult(false, "$label failed")
     }
-
-    private fun executeScreenshot(): ActionResult {
-        val service = accessibilityService ?: return ActionResult(false, "No service")
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                service.takeScreenshot(
-                    mainHandler,
-                    Executors.newSingleThreadExecutor(),
-                    object : AccessibilityService.TakeScreenshotCallback {
-                        override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                            Log.d(TAG, "📸 Screenshot captured")
-                        }
-                        override fun onFailure(errorCode: Int) {
-                            Log.w(TAG, "Screenshot failed: $errorCode")
-                        }
-                    }
-                )
-            }
-            ActionResult(true, "Screenshot requested")
-        } catch (e: Exception) {
-            ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
-        }
+private fun executeScreenshot(): ActionResult {
+    val service = accessibilityService ?: return ActionResult(false, "No service")
+    return try {
+        // Use the global action for screenshot (works on all versions)
+        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)
+        ActionResult(true, "Screenshot captured")
+    } catch (e: Exception) {
+        ActionResult(false, "Screenshot failed: ${e.localizedMessage}")
     }
-
+}
     private suspend fun executeScroll(up: Boolean): ActionResult {
         val service = accessibilityService ?: return ActionResult(false, "No service")
         val root = getRootNode() ?: return ActionResult(false, "Cannot access screen")

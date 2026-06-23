@@ -4,9 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -19,10 +17,23 @@ class AutomationEngine(
     companion object {
         private const val TAG = "Automation"
         private const val PLANNING_MODEL = "models/gemini-2.5-flash"
-        private const val STEP_TIMEOUT_MS = 15000L
-        private const val SCREEN_READ_MAX_CHARS = 5000
+        private const val STEP_DELAY_MS = 600L
         private const val MAX_CONSECUTIVE_FAILURES = 5
+        private const val SCREEN_READ_MAX_CHARS = 3000
     }
+
+    // ═══════════════════════════════════════════
+    // Safety Manager
+    // ═══════════════════════════════════════════
+
+    val safetyManager = AutomationSafetyManager(context)
+    private var isCancelled = false
+    private var isPaused = false
+    private var pauseLock = Object()
+
+    // ═══════════════════════════════════════════
+    // Data Classes
+    // ═══════════════════════════════════════════
 
     data class AutomationTask(
         val id: String = java.util.UUID.randomUUID().toString(),
@@ -50,8 +61,8 @@ class AutomationEngine(
         val durationMs: Long = 0
     )
 
-    enum class TaskStatus { IDLE, PLANNING, EXECUTING, COMPLETED, FAILED, PAUSED }
-    enum class StepStatus { PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED, TIMED_OUT }
+    enum class TaskStatus { IDLE, PLANNING, EXECUTING, PAUSED, COMPLETED, FAILED, CANCELLED }
+    enum class StepStatus { PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED }
 
     enum class StepType {
         OPEN_APP, TAP, LONG_PRESS, TYPE, SWIPE_UP, SWIPE_DOWN, SWIPE_LEFT, SWIPE_RIGHT,
@@ -65,10 +76,10 @@ class AutomationEngine(
         val completedSteps: Int = 0,
         val totalSteps: Int = 0,
         val failedSteps: Int = 0,
+        val cancelledByUser: Boolean = false,
         val errors: List<String> = emptyList(),
         val screenshots: List<String> = emptyList(),
-        val totalDurationMs: Long = 0,
-        val aiDecisions: List<String> = emptyList()
+        val totalDurationMs: Long = 0
     )
 
     data class AutomationProgress(
@@ -81,41 +92,83 @@ class AutomationEngine(
     )
 
     // ═══════════════════════════════════════════
-    // Main Automation Loop
+    // Main Automation Loop — with Safety
     // ═══════════════════════════════════════════
 
     suspend fun executeAutomation(
         userRequest: String,
         onProgress: (AutomationProgress) -> Unit = {},
-        onScreenshot: ((String) -> Unit)? = null,
-        onAiDecision: ((String) -> Unit)? = null
+        onScreenshot: ((String) -> Unit)? = null
     ): AutomationTask = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val task = AutomationTask(userRequest = userRequest)
         var consecutiveFailures = 0
         val allScreenshots = mutableListOf<String>()
+        isCancelled = false
+        isPaused = false
+
+        // Start safety monitoring
+        safetyManager.startMonitoring(
+            onResume = {
+                synchronized(pauseLock) {
+                    isPaused = false
+                    pauseLock.notifyAll()
+                }
+            },
+            onCancel = {
+                isCancelled = true
+                synchronized(pauseLock) {
+                    isPaused = false
+                    pauseLock.notifyAll()
+                }
+            }
+        )
 
         try {
+            // Phase 1: Plan
             onProgress(AutomationProgress(0, 0, "Analyzing request...", 0.02f))
+            Log.d(TAG, "🤖 Planning automation: ${userRequest.take(80)}")
 
             val planJson = createAutomationPlan(userRequest)
             if (planJson.isBlank()) {
-                return@withContext task.copy(status = TaskStatus.FAILED, result = AutomationResult(false, "Failed to plan. Try rephrasing."))
+                safetyManager.stopMonitoring()
+                return@withContext task.copy(status = TaskStatus.FAILED, result = AutomationResult(false, "Failed to create a plan. Try rephrasing your request."))
             }
 
             val steps = parseAutomationSteps(planJson)
             if (steps.isEmpty()) {
-                return@withContext task.copy(status = TaskStatus.FAILED, result = AutomationResult(false, "No steps generated."))
+                safetyManager.stopMonitoring()
+                return@withContext task.copy(status = TaskStatus.FAILED, result = AutomationResult(false, "No steps generated. Try a simpler task."))
             }
 
             Log.d(TAG, "✅ Plan: ${steps.size} steps")
             val totalSteps = steps.size
             val completedSteps = mutableListOf<AutomationStep>()
-            val aiDecisions = mutableListOf<String>()
 
+            // Phase 2: Execute steps with pause/cancel checks
             for ((index, step) in steps.withIndex()) {
+                // Check cancel
+                if (isCancelled) {
+                    Log.d(TAG, "⏹️ Cancelled by user")
+                    completedSteps.add(step.copy(status = StepStatus.SKIPPED, output = "Cancelled by user"))
+                    safetyManager.stopMonitoring()
+                    return@withContext task.copy(
+                        steps = completedSteps, status = TaskStatus.CANCELLED,
+                        result = AutomationResult(false, "Automation cancelled by user.", completedSteps.count { it.status == StepStatus.COMPLETED }, totalSteps, completedSteps.count { it.status == StepStatus.FAILED }, true, completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" }, allScreenshots, System.currentTimeMillis() - startTime)
+                    )
+                }
+
+                // Check pause
+                synchronized(pauseLock) {
+                    while (isPaused && !isCancelled) {
+                        pauseLock.wait()
+                    }
+                }
+                if (isCancelled) continue
+
                 if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                    completedSteps.add(step.copy(status = StepStatus.SKIPPED, output = "Skipped due to too many failures"))
+                    Log.w(TAG, "⚠️ Stopping after $consecutiveFailures consecutive failures")
+                    completedSteps.add(step.copy(status = StepStatus.SKIPPED, output = "Skipped — too many failures"))
                     break
                 }
 
@@ -125,46 +178,59 @@ class AutomationEngine(
                 val estimatedRemaining = if (stepNum > 0) (elapsed / stepNum) * (totalSteps - stepNum) else 0
 
                 onProgress(AutomationProgress(stepNum, totalSteps, step.description, progress, step.action, estimatedRemaining))
+                safetyManager.updateProgress(stepNum, totalSteps, step.description)
+                Log.d(TAG, "▶️ Step $stepNum/$totalSteps: ${step.action} | ${step.description}")
 
                 val stepStart = System.currentTimeMillis()
                 val executed = executeStep(step)
                 val stepDuration = System.currentTimeMillis() - stepStart
 
-                if (executed.status == StepStatus.COMPLETED) consecutiveFailures = 0
-                else consecutiveFailures++
-
-                if (executed.screenshotPath != null) {
-                    allScreenshots.add(executed.screenshotPath)
-                    onScreenshot?.invoke(executed.screenshotPath)
-                }
-                if (executed.output != null && executed.action == StepType.AI_DECIDE_NEXT) {
-                    aiDecisions.add(executed.output)
-                    onAiDecision?.invoke(executed.output)
+                if (executed.status == StepStatus.COMPLETED) {
+                    consecutiveFailures = 0
+                    if (executed.screenshotPath != null) {
+                        allScreenshots.add(executed.screenshotPath)
+                        onScreenshot?.invoke(executed.screenshotPath)
+                    }
+                } else {
+                    consecutiveFailures++
+                    Log.w(TAG, "  ⚠️ Failed: ${executed.output}")
                 }
 
                 completedSteps.add(executed.copy(durationMs = stepDuration))
-                if (index < steps.size - 1 && consecutiveFailures == 0) delay(step.waitMs ?: 600)
+                if (index < steps.size - 1 && consecutiveFailures == 0) {
+                    delay(step.waitMs ?: STEP_DELAY_MS)
+                }
             }
 
+            // Phase 3: Result
             val success = completedSteps.all { it.status == StepStatus.COMPLETED }
             val totalDuration = System.currentTimeMillis() - startTime
             val summary = buildSummary(completedSteps, success, totalDuration)
 
-            onProgress(AutomationProgress(totalSteps, totalSteps, if (success) "✅ Complete!" else "⚠️ Done with issues", 1f))
+            onProgress(AutomationProgress(totalSteps, totalSteps, if (success) "✅ Complete!" else "⚠️ Done", 1f))
+            safetyManager.stopMonitoring()
 
             task.copy(
                 steps = completedSteps,
                 status = if (success) TaskStatus.COMPLETED else TaskStatus.COMPLETED,
-                result = AutomationResult(success, summary, completedSteps.count { it.status == StepStatus.COMPLETED }, totalSteps, completedSteps.count { it.status == StepStatus.FAILED }, completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" }, allScreenshots, totalDuration, aiDecisions)
+                result = AutomationResult(
+                    success = success, summary = summary,
+                    completedSteps = completedSteps.count { it.status == StepStatus.COMPLETED },
+                    totalSteps = totalSteps,
+                    failedSteps = completedSteps.count { it.status == StepStatus.FAILED },
+                    errors = completedSteps.filter { it.status == StepStatus.FAILED }.map { it.output ?: "Unknown" },
+                    screenshots = allScreenshots, totalDurationMs = totalDuration
+                )
             )
         } catch (e: Exception) {
             Log.e(TAG, "❌ Automation crashed", e)
+            safetyManager.stopMonitoring()
             task.copy(status = TaskStatus.FAILED, result = AutomationResult(false, "Crashed: ${e.localizedMessage}", errors = listOf(e.localizedMessage ?: "Crash")))
         }
     }
 
     // ═══════════════════════════════════════════
-    // Execute Single Step
+    // Step Executor
     // ═══════════════════════════════════════════
 
     private suspend fun executeStep(step: AutomationStep): AutomationStep {
@@ -192,16 +258,16 @@ class AutomationEngine(
                 StepType.AI_ANALYZE_SCREEN -> executeAiAnalyze(step)
                 StepType.AI_DECIDE_NEXT -> executeAiDecide(step)
                 StepType.OPEN_URL -> executeOpenApp(step.copy(packageName = "com.android.chrome"))
-                else -> step.copy(status = StepStatus.SKIPPED, output = "Action not implemented: ${step.action}")
+                else -> step.copy(status = StepStatus.SKIPPED, output = "Action not implemented")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Step failed: ${e.localizedMessage}")
+            Log.e(TAG, "Step failed", e)
             step.copy(status = StepStatus.FAILED, output = "Error: ${e.localizedMessage}")
         }
     }
 
     // ═══════════════════════════════════════════
-    // Step Executors
+    // Action Implementations (unchanged from fixed version)
     // ═══════════════════════════════════════════
 
     private suspend fun executeOpenApp(step: AutomationStep): AutomationStep {
@@ -211,11 +277,8 @@ class AutomationEngine(
     }
 
     private suspend fun executeTap(step: AutomationStep): AutomationStep {
-        val action = if (step.target != null) {
-            DeviceController.DeviceAction(DeviceController.ActionType.FIND_AND_TAP, target = step.target, description = step.description)
-        } else {
-            DeviceController.DeviceAction(DeviceController.ActionType.TAP, x = step.x ?: 540, y = step.y ?: 960, description = step.description)
-        }
+        val action = if (step.target != null) DeviceController.DeviceAction(DeviceController.ActionType.FIND_AND_TAP, target = step.target, description = step.description)
+        else DeviceController.DeviceAction(DeviceController.ActionType.TAP, x = step.x ?: 540, y = step.y ?: 960, description = step.description)
         val result = deviceController.executeAction(action)
         return step.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, output = result.message)
     }
@@ -242,9 +305,9 @@ class AutomationEngine(
     }
 
     private suspend fun executeSystemAction(action: DeviceController.ActionType, label: String): AutomationStep {
-        val step = AutomationStep(description = "Press $label", action = StepType.BACK)
+        val s = AutomationStep(description = "Press $label", action = StepType.BACK)
         val result = deviceController.executeAction(DeviceController.DeviceAction(action, description = label))
-        return step.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, output = result.message)
+        return s.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, output = result.message)
     }
 
     private suspend fun executeWait(step: AutomationStep): AutomationStep {
@@ -254,15 +317,15 @@ class AutomationEngine(
     }
 
     private suspend fun executeReadScreen(): AutomationStep {
-        val step = AutomationStep(description = "Read screen", action = StepType.READ_SCREEN)
+        val s = AutomationStep(description = "Read screen", action = StepType.READ_SCREEN)
         val content = deviceController.readScreen()
-        return step.copy(status = StepStatus.COMPLETED, output = content?.take(SCREEN_READ_MAX_CHARS) ?: "No content")
+        return s.copy(status = StepStatus.COMPLETED, output = content?.take(SCREEN_READ_MAX_CHARS))
     }
 
     private suspend fun executeTakeScreenshot(): AutomationStep {
-        val step = AutomationStep(description = "Take screenshot", action = StepType.TAKE_SCREENSHOT)
+        val s = AutomationStep(description = "Screenshot", action = StepType.TAKE_SCREENSHOT)
         val result = deviceController.executeAction(DeviceController.DeviceAction(DeviceController.ActionType.SCREENSHOT, description = "Screenshot"))
-        return step.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, output = "Screenshot captured", screenshotPath = if (result.success) "screenshot_${System.currentTimeMillis()}.png" else null)
+        return s.copy(status = if (result.success) StepStatus.COMPLETED else StepStatus.FAILED, output = result.message, screenshotPath = if (result.success) "screenshot_${System.currentTimeMillis()}" else null)
     }
 
     private suspend fun executeFindAndTap(step: AutomationStep): AutomationStep {
@@ -300,17 +363,18 @@ class AutomationEngine(
 
     private suspend fun executeAiAnalyze(step: AutomationStep): AutomationStep {
         return try {
-            val response = geminiRepository.generateResponse("Analyze this: ${step.text ?: "Describe what you see"}", PLANNING_MODEL)
+            val prompt = step.text ?: "Describe what's on the screen"
+            val response = geminiRepository.generateResponse("Analyze: $prompt", PLANNING_MODEL)
             step.copy(status = StepStatus.COMPLETED, output = response)
-        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "AI analysis failed: ${e.localizedMessage}") }
+        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "AI analysis failed") }
     }
 
     private suspend fun executeAiDecide(step: AutomationStep): AutomationStep {
         return try {
-            val prompt = "Based on context: \"${step.text ?: "What should I do next?"}\"\nChoose ONE: TAP [element], SWIPE_UP, SWIPE_DOWN, TYPE [text], BACK, SCROLL_DOWN, DONE. Return ONLY the action."
-            val response = geminiRepository.generateResponse(prompt, PLANNING_MODEL)
+            val context = step.text ?: "What should I do next?"
+            val response = geminiRepository.generateResponse("Based on: \"$context\"\nChoose ONE: TAP [element], SWIPE_UP, SWIPE_DOWN, TYPE [text], BACK, SCROLL_DOWN, DONE. Return ONLY the action.", PLANNING_MODEL)
             step.copy(status = StepStatus.COMPLETED, output = response.trim())
-        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "AI decision failed: ${e.localizedMessage}") }
+        } catch (e: Exception) { step.copy(status = StepStatus.FAILED, output = "AI decision failed") }
     }
 
     // ═══════════════════════════════════════════
@@ -321,22 +385,8 @@ class AutomationEngine(
         try {
             val key = KeyManager.getGeminiKey(context) ?: return@withContext ""
             val model = GenerativeModel(modelName = PLANNING_MODEL, apiKey = key,
-                generationConfig = com.google.ai.client.generativeai.type.generationConfig { temperature = 0.2f; maxOutputTokens = 4096 })
-
-            val prompt = """
-Create a step-by-step automation plan for this task. Return ONLY a JSON array.
-
-Task: $userRequest
-
-Available actions: OPEN_APP, TAP, TYPE, SWIPE_UP, SWIPE_DOWN, SWIPE_LEFT, SWIPE_RIGHT, SCROLL_UP, SCROLL_DOWN, BACK, HOME, WAIT, READ_SCREEN, TAKE_SCREENSHOT, FIND_AND_TAP, FIND_AND_TYPE, SEND_MESSAGE, AI_ANALYZE_SCREEN, AI_DECIDE_NEXT, OPEN_URL
-
-Each step: {"description":"...","action":"...","target":"...","text":"...","packageName":"...","waitMs":...}
-
-Example: [{"description":"Open WhatsApp","action":"OPEN_APP","packageName":"com.whatsapp"},{"description":"Search for Mom","action":"FIND_AND_TAP","target":"Search"}]
-
-Be thorough. Include EVERY step. Return ONLY JSON array.
-            """.trimIndent()
-
+                generationConfig = com.google.ai.client.generativeai.type.generationConfig { temperature = 0.2f; maxOutputTokens = 2048 })
+            val prompt = "Create step-by-step automation for: $userRequest\nReturn ONLY JSON array. Actions: OPEN_APP, TAP, TYPE, SWIPE_UP, SWIPE_DOWN, SWIPE_LEFT, SWIPE_RIGHT, SCROLL_UP, SCROLL_DOWN, BACK, HOME, WAIT, READ_SCREEN, TAKE_SCREENSHOT, FIND_AND_TAP, FIND_AND_TYPE, SEND_MESSAGE, AI_ANALYZE_SCREEN, AI_DECIDE_NEXT, OPEN_URL\nFormat: {\"description\":\"...\",\"action\":\"...\",\"target\":\"...\",\"text\":\"...\",\"packageName\":\"...\",\"waitMs\":...}"
             val response = model.generateContent(content { text(prompt) })
             response.text?.trim() ?: ""
         } catch (e: Exception) { "" }

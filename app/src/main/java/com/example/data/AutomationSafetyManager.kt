@@ -8,15 +8,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.Gravity
-import android.view.MotionEvent
-import android.view.View
-import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,57 +24,62 @@ class AutomationSafetyManager(private val context: Context) {
         private const val TAG = "AutoSafety"
         private const val CHANNEL_ID = "zarp_automation_safety"
         private const val NOTIFICATION_ID = 2001
+        private const val ACTION_PAUSE = "com.example.AUTOMATION_PAUSE"
         private const val ACTION_RESUME = "com.example.AUTOMATION_RESUME"
         private const val ACTION_CANCEL = "com.example.AUTOMATION_CANCEL"
-        private const val TRIPLE_TAP_WINDOW_MS = 800L
-        private const val OVERLAY_ALPHA = 0.02f
+        private const val ACTION_SKIP = "com.example.AUTOMATION_SKIP_STEP"
+        private const val AUTO_RESUME_DELAY_MS = 30000L
     }
+
+    // ═══════════════════════════════════════════
+    // State
+    // ═══════════════════════════════════════════
 
     data class AutomationState(
         val isRunning: Boolean = false,
         val isPaused: Boolean = false,
         val currentStep: Int = 0,
         val totalSteps: Int = 0,
-        val description: String = ""
-    )
-
-    // ═══════════════════════════════════════════
-    // State
-    // ═══════════════════════════════════════════
+        val description: String = "",
+        val startTimeMs: Long = 0L,
+        val pausedAtMs: Long = 0L,
+        val completedSteps: Int = 0,
+        val failedSteps: Int = 0
+    ) {
+        val elapsedMs: Long get() = if (startTimeMs == 0L) 0L else System.currentTimeMillis() - startTimeMs
+        val progressPercent: Int get() = if (totalSteps == 0) 0 else (currentStep * 100) / totalSteps
+    }
 
     private val _state = MutableStateFlow(AutomationState())
     val state: StateFlow<AutomationState> = _state.asStateFlow()
 
-    private var onResumeCallback: (() -> Unit)? = null
-    private var onCancelCallback: (() -> Unit)? = null
-    private var resumeJob: kotlinx.coroutines.Job? = null
-
     // ═══════════════════════════════════════════
-    // Triple‑Tap Overlay (Invisible)
+    // Callbacks
     // ═══════════════════════════════════════════
 
-    private var safetyOverlay: View? = null
-    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    var onPauseCallback: (() -> Unit)? = null
+    var onResumeCallback: (() -> Unit)? = null
+    var onCancelCallback: (() -> Unit)? = null
+    var onSkipStepCallback: (() -> Unit)? = null
+
+    // ═══════════════════════════════════════════
+    // Auto‑resume handler
+    // ═══════════════════════════════════════════
+
     private val handler = Handler(Looper.getMainLooper())
-    private var tapCount = 0
-    private var lastTapTime = 0L
-    private var overlayDismissRunnable: Runnable? = null
+    private var autoResumeRunnable: Runnable? = null
 
     // ═══════════════════════════════════════════
-    // Broadcast Receiver for Notification Actions
+    // Broadcast Receiver
     // ═══════════════════════════════════════════
 
     private val actionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                ACTION_RESUME -> {
-                    Log.d(TAG, "▶️ Resume broadcast received")
-                    resumeAutomation()
-                }
-                ACTION_CANCEL -> {
-                    Log.d(TAG, "⏹️ Cancel broadcast received")
-                    cancelAutomation()
-                }
+                ACTION_PAUSE -> pauseAutomation()
+                ACTION_RESUME -> resumeAutomation()
+                ACTION_CANCEL -> cancelAutomation()
+                ACTION_SKIP -> skipCurrentStep()
             }
         }
     }
@@ -87,8 +87,10 @@ class AutomationSafetyManager(private val context: Context) {
     init {
         createNotificationChannel()
         context.registerReceiver(actionReceiver, IntentFilter().apply {
+            addAction(ACTION_PAUSE)
             addAction(ACTION_RESUME)
             addAction(ACTION_CANCEL)
+            addAction(ACTION_SKIP)
         }, Context.RECEIVER_NOT_EXPORTED)
     }
 
@@ -97,27 +99,76 @@ class AutomationSafetyManager(private val context: Context) {
     // ═══════════════════════════════════════════
 
     fun startMonitoring(
-        onResume: () -> Unit,
-        onCancel: () -> Unit
+        onPause: () -> Unit = {},
+        onResume: () -> Unit = {},
+        onCancel: () -> Unit = {},
+        onSkipStep: () -> Unit = {}
     ) {
+        onPauseCallback = onPause
         onResumeCallback = onResume
         onCancelCallback = onCancel
-        _state.value = AutomationState(isRunning = true, isPaused = false)
-        showInvisibleOverlay()
+        onSkipStepCallback = onSkipStep
+        _state.value = AutomationState(
+            isRunning = true,
+            isPaused = false,
+            startTimeMs = System.currentTimeMillis()
+        )
         showRunningNotification()
         Log.d(TAG, "🛡️ Safety monitoring started")
     }
 
-    fun updateProgress(currentStep: Int, totalSteps: Int, description: String) {
-        _state.value = _state.value.copy(currentStep = currentStep, totalSteps = totalSteps, description = description)
+    fun updateProgress(currentStep: Int, totalSteps: Int, description: String, completedSteps: Int = 0, failedSteps: Int = 0) {
+        _state.value = _state.value.copy(
+            currentStep = currentStep,
+            totalSteps = totalSteps,
+            description = description,
+            completedSteps = completedSteps,
+            failedSteps = failedSteps
+        )
         updateNotification()
     }
 
+    fun pauseAutomation() {
+        if (!_state.value.isRunning) return
+        _state.value = _state.value.copy(isPaused = true, pausedAtMs = System.currentTimeMillis())
+        showPausedNotification()
+        onPauseCallback?.invoke()
+
+        // Schedule auto‑resume after 30 seconds if user doesn't respond
+        scheduleAutoResume()
+        Log.d(TAG, "⏸️ Automation paused")
+    }
+
+    fun resumeAutomation() {
+        if (!_state.value.isRunning) return
+        cancelAutoResume()
+        _state.value = _state.value.copy(isPaused = false)
+        showRunningNotification()
+        onResumeCallback?.invoke()
+        Log.d(TAG, "▶️ Automation resumed")
+    }
+
+    fun cancelAutomation() {
+        cancelAutoResume()
+        _state.value = AutomationState()
+        cancelNotification()
+        onCancelCallback?.invoke()
+        Log.d(TAG, "⏹️ Automation cancelled")
+    }
+
+    fun skipCurrentStep() {
+        if (!_state.value.isRunning) return
+        onSkipStepCallback?.invoke()
+        Log.d(TAG, "⏭️ Skipping current step")
+    }
+
     fun stopMonitoring() {
+        cancelAutoResume()
+        onPauseCallback = null
         onResumeCallback = null
         onCancelCallback = null
+        onSkipStepCallback = null
         _state.value = AutomationState()
-        hideInvisibleOverlay()
         cancelNotification()
         Log.d(TAG, "🛡️ Safety monitoring stopped")
     }
@@ -128,99 +179,21 @@ class AutomationSafetyManager(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // Invisible Overlay (Triple‑Tap Detection)
+    // Auto‑resume logic
     // ═══════════════════════════════════════════
 
-    private fun showInvisibleOverlay() {
-        if (safetyOverlay != null) return
-
-        safetyOverlay = View(context).apply {
-            setBackgroundColor(0x05FFFFFF.toInt())
-            setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastTapTime < TRIPLE_TAP_WINDOW_MS) {
-                        tapCount++
-                    } else {
-                        tapCount = 1
-                    }
-                    lastTapTime = now
-
-                    if (tapCount >= 3) {
-                        tapCount = 0
-                        handler.post { handleTripleTap() }
-                    }
-
-                    overlayDismissRunnable?.let { handler.removeCallbacks(it) }
-                    overlayDismissRunnable = Runnable {
-                        tapCount = 0
-                    }
-                    handler.postDelayed(overlayDismissRunnable!!, TRIPLE_TAP_WINDOW_MS * 2)
-                }
-                false // Pass through — does NOT block touch
-            }
-        }
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or  // ← Passes touches through
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,  // ← Catches edge touches
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            alpha = OVERLAY_ALPHA
-        }
-
-        windowManager.addView(safetyOverlay, params)
-        Log.d(TAG, "👻 Invisible overlay added (triple‑tap to pause)")
-    }
-
-    private fun hideInvisibleOverlay() {
-        safetyOverlay?.let {
-            try { windowManager.removeView(it) } catch (e: Exception) {}
-        }
-        safetyOverlay = null
-        Log.d(TAG, "👻 Invisible overlay removed")
-    }
-
-    private fun handleTripleTap() {
-        if (_state.value.isPaused) {
+    private fun scheduleAutoResume() {
+        cancelAutoResume()
+        autoResumeRunnable = Runnable {
+            Log.d(TAG, "⏰ Auto‑resume triggered after ${AUTO_RESUME_DELAY_MS}ms")
             resumeAutomation()
-        } else {
-            pauseAutomation()
         }
+        handler.postDelayed(autoResumeRunnable!!, AUTO_RESUME_DELAY_MS)
     }
 
-    // ═══════════════════════════════════════════
-    // Pause / Resume / Cancel
-    // ═══════════════════════════════════════════
-
-    private fun pauseAutomation() {
-        _state.value = _state.value.copy(isPaused = true)
-        showPausedNotification()
-        Log.d(TAG, "⏸️ Automation paused by triple‑tap")
-    }
-
-    private fun resumeAutomation() {
-        _state.value = _state.value.copy(isPaused = false)
-        showRunningNotification()
-        onResumeCallback?.invoke()
-        Log.d(TAG, "▶️ Automation resumed")
-    }
-
-    private fun cancelAutomation() {
-        _state.value = AutomationState()
-        hideInvisibleOverlay()
-        cancelNotification()
-        onCancelCallback?.invoke()
-        Log.d(TAG, "⏹️ Automation cancelled")
+    private fun cancelAutoResume() {
+        autoResumeRunnable?.let { handler.removeCallbacks(it) }
+        autoResumeRunnable = null
     }
 
     // ═══════════════════════════════════════════
@@ -229,13 +202,10 @@ class AutomationSafetyManager(private val context: Context) {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Automation Safety",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows pause/resume controls during automation"
+            val channel = NotificationChannel(CHANNEL_ID, "Automation Safety", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Pause, resume, skip, or cancel automation"
                 setSound(null, null)
+                enableVibration(false)
             }
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -243,36 +213,40 @@ class AutomationSafetyManager(private val context: Context) {
     }
 
     private fun showRunningNotification() {
-        val notification = buildNotification(
-            title = "🎮 Automation Running",
-            text = "Step ${_state.value.currentStep}/${_state.value.totalSteps}: ${_state.value.description.take(50)}",
-            ongoing = true,
-            actions = listOf(
-                NotificationAction("⏸️ Pause", ACTION_RESUME) { resumeAutomation() }
-            )
-        )
+        val state = _state.value
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("🎮 Automation Running")
+            .setContentText("Step ${state.currentStep}/${state.totalSteps}: ${state.description.take(40)}")
+            .setSubText("${state.progressPercent}% complete • Tap to control")
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(createOpenAppIntent())
+            .addAction(android.R.drawable.ic_media_pause, "⏸️ Pause", createPendingIntent(ACTION_PAUSE))
+            .addAction(android.R.drawable.ic_media_next, "⏭️ Skip", createPendingIntent(ACTION_SKIP))
+            .addAction(android.R.drawable.ic_delete, "⏹️ Cancel", createPendingIntent(ACTION_CANCEL))
+            .build()
+
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun showPausedNotification() {
-        val resumeIntent = PendingIntent.getBroadcast(
-            context, 0, Intent(ACTION_RESUME),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val cancelIntent = PendingIntent.getBroadcast(
-            context, 1, Intent(ACTION_CANCEL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val state = _state.value
+        val pausedDuration = System.currentTimeMillis() - state.pausedAtMs
+        val pausedSeconds = pausedDuration / 1000
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_pause)
             .setContentTitle("⏸️ Automation Paused")
-            .setContentText("Tap Resume to continue or Cancel to stop")
+            .setContentText("Paused for ${pausedSeconds}s • Step ${state.currentStep}/${state.totalSteps}")
+            .setSubText("Auto‑resume in ${(AUTO_RESUME_DELAY_MS - pausedDuration) / 1000}s")
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_media_play, "▶️ Resume", resumeIntent)
-            .addAction(android.R.drawable.ic_delete, "⏹️ Cancel", cancelIntent)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(createOpenAppIntent())
+            .addAction(android.R.drawable.ic_media_play, "▶️ Resume", createPendingIntent(ACTION_RESUME))
+            .addAction(android.R.drawable.ic_media_next, "⏭️ Skip", createPendingIntent(ACTION_SKIP))
+            .addAction(android.R.drawable.ic_delete, "⏹️ Cancel", createPendingIntent(ACTION_CANCEL))
             .build()
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -280,11 +254,7 @@ class AutomationSafetyManager(private val context: Context) {
     }
 
     private fun updateNotification() {
-        if (_state.value.isPaused) {
-            showPausedNotification()
-        } else {
-            showRunningNotification()
-        }
+        if (_state.value.isPaused) showPausedNotification() else showRunningNotification()
     }
 
     private fun cancelNotification() {
@@ -292,33 +262,25 @@ class AutomationSafetyManager(private val context: Context) {
         manager.cancel(NOTIFICATION_ID)
     }
 
-    private fun buildNotification(
-        title: String,
-        text: String,
-        ongoing: Boolean,
-        actions: List<NotificationAction> = emptyList()
-    ): Notification {
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setOngoing(ongoing)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+    // ═══════════════════════════════════════════
+    // Helpers
+    // ═══════════════════════════════════════════
 
-        actions.forEach { action ->
-            val intent = PendingIntent.getBroadcast(
-                context, action.title.hashCode(), Intent(action.action),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            builder.addAction(android.R.drawable.ic_media_play, action.title, intent)
-        }
-
-        return builder.build()
+    private fun createPendingIntent(action: String): PendingIntent {
+        val intent = Intent(action)
+        return PendingIntent.getBroadcast(
+            context, action.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
-    data class NotificationAction(
-        val title: String,
-        val action: String,
-        val callback: () -> Unit
-    )
+    private fun createOpenAppIntent(): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 }
